@@ -1,0 +1,33 @@
+[package]
+name = "claude-cockpit"
+version = "0.1.0"
+edition = "2021"
+description = "A btm-style terminal dashboard for Claude Code — git worktrees, background agents, token/USD cost, Docker, and dev processes in one responsive TUI."
+license = "MIT"
+repository = "https://github.com/shaunbarney/claude-cockpit"
+homepage = "https://github.com/shaunbarney/claude-cockpit"
+readme = "README.md"
+keywords = ["claude", "tui", "monitoring", "dashboard", "git"]
+categories = ["command-line-utilities", "development-tools"]
+authors = ["Shaun Barney"]
+
+[[bin]]
+name = "claude-cockpit"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+comfy-table = { version = "7", features = ["crossterm"] }
+ratatui = "0.29"
+console = "0.15"
+tokei = "14"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = "0.32"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+dirs = "5"
+
+[profile.release]
+opt-level = 3
+lto = true
