@@ -126,6 +126,54 @@ pub fn totalize(records: &[UsageRecord], prices: &PriceTable) -> UsageTotals {
     totals
 }
 
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::time::SystemTime;
+
+/// Per-file cache: path -> (mtime, len, parsed records). Re-parse only on change.
+pub type UsageCache = HashMap<PathBuf, (SystemTime, u64, Vec<UsageRecord>)>;
+
+/// Recursively collect `*.jsonl` files under `dir`.
+fn collect_jsonl(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            collect_jsonl(&p, out);
+        } else if p.extension().and_then(|x| x.to_str()) == Some("jsonl") {
+            out.push(p);
+        }
+    }
+}
+
+/// Scan all session transcripts under ~/.claude/projects, re-parsing only changed
+/// files (keyed by mtime+len), and return aggregated totals.
+pub fn scan_all(cache: &mut UsageCache) -> UsageTotals {
+    let prices = crate::collect::pricing::load();
+    let Some(home) = crate::util::claude_home() else { return UsageTotals::default() };
+    let mut files = Vec::new();
+    collect_jsonl(&home.join("projects"), &mut files);
+    let mut all: Vec<UsageRecord> = Vec::new();
+    for path in &files {
+        let (mtime, len) = std::fs::metadata(path)
+            .map(|m| (m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.len()))
+            .unwrap_or((SystemTime::UNIX_EPOCH, 0));
+        let fresh = match cache.get(path) {
+            Some((mt, l, _)) => *mt != mtime || *l != len,
+            None => true,
+        };
+        if fresh {
+            let txt = std::fs::read_to_string(path).unwrap_or_default();
+            let recs = parse_session(&txt, "unknown");
+            cache.insert(path.clone(), (mtime, len, recs));
+        }
+        if let Some((_, _, recs)) = cache.get(path) {
+            all.extend_from_slice(recs);
+        }
+    }
+    totalize(&all, &prices)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

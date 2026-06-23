@@ -22,6 +22,13 @@ pub fn publish_jobs(data: &Arc<Mutex<DashboardData>>, jobs: Vec<Job>) {
     data.lock().unwrap().jobs = jobs;
 }
 
+pub fn publish_usage(
+    data: &Arc<Mutex<DashboardData>>,
+    totals: crate::collect::usage::UsageTotals,
+) {
+    data.lock().unwrap().usage = Some(totals);
+}
+
 /// One full gather + publish (used at startup and on `r`).
 pub fn refresh_now(root: &str, data: &Arc<Mutex<DashboardData>>) {
     git::fetch_origin(root);
@@ -54,10 +61,28 @@ pub fn spawn(root: String, data: Arc<Mutex<DashboardData>>) -> Arc<AtomicBool> {
 
     // Fast thread: jobs-only refresh every 2 s (20 × 100 ms ticks).
     let s = stop.clone();
+    let data3 = data.clone();
     thread::spawn(move || {
         while !s.load(Ordering::Relaxed) {
-            publish_jobs(&data, jobs::gather_jobs());
+            publish_jobs(&data3, jobs::gather_jobs());
             for _ in 0..20 {
+                if s.load(Ordering::Relaxed) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+    });
+
+    // Cost thread: usage scan every 10 s (100 × 100 ms ticks).
+    let s = stop.clone();
+    thread::spawn(move || {
+        // Best-effort live price refresh at startup; ignore result.
+        let _ = crate::collect::pricing::fetch_litellm();
+        let mut cache = crate::collect::usage::UsageCache::new();
+        while !s.load(Ordering::Relaxed) {
+            publish_usage(&data, crate::collect::usage::scan_all(&mut cache));
+            for _ in 0..100 {
                 if s.load(Ordering::Relaxed) {
                     break;
                 }

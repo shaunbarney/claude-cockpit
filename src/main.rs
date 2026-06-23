@@ -1,6 +1,7 @@
 mod app;
 mod collect;
 mod event;
+mod graph;
 mod layout;
 mod refresh;
 mod render;
