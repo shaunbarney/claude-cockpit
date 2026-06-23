@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="claude-cockpit" width="320">
+  <img src="https://raw.githubusercontent.com/shaunbarney/claude-cockpit/main/assets/logo.png" alt="claude-cockpit" width="320">
 </p>
 
 <h1 align="center">claude-cockpit</h1>
@@ -7,6 +7,12 @@
 <p align="center">
   A <a href="https://github.com/ClementTsang/bottom"><code>btm</code></a>-style terminal dashboard for <strong>Claude Code</strong> and your dev environment —
   git worktrees, background agents, token/USD cost, Docker, and dev processes in one responsive TUI.
+</p>
+
+<p align="center">
+  <a href="https://github.com/shaunbarney/claude-cockpit/actions/workflows/ci.yml"><img src="https://github.com/shaunbarney/claude-cockpit/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/claude-cockpit"><img src="https://img.shields.io/crates/v/claude-cockpit.svg" alt="crates.io"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
 ---
@@ -34,7 +40,10 @@ The layout reflows to your terminal: a multi-column grid on a wide screen, a sin
 With a recent Rust toolchain (`rustup`):
 
 ```bash
-# from crates.io-style git install
+# from crates.io (after the first published release)
+cargo install claude-cockpit
+
+# straight from git (works today)
 cargo install --git https://github.com/shaunbarney/claude-cockpit
 
 # or from a local clone
