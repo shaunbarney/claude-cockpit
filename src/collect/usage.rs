@@ -31,12 +31,15 @@ pub struct ModelUsage {
     pub cost_usd: f64,
     pub input: u64,
     pub output: u64,
+    pub cache_write: u64,
+    pub cache_read: u64,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct UsageTotals {
     pub by_day: Vec<DayUsage>,     // ascending by day
     pub by_model: Vec<ModelUsage>, // descending by cost
+    pub by_model_day: std::collections::HashMap<String, Vec<DayUsage>>, // model -> ascending days
     pub total_cost_usd: f64,
     pub cache_read: u64,
     pub cache_write: u64,
@@ -100,7 +103,8 @@ fn record_cost(r: &UsageRecord, t: &PriceTable) -> f64 {
 pub fn totalize(records: &[UsageRecord], prices: &PriceTable) -> UsageTotals {
     use std::collections::HashMap;
     let mut day: HashMap<String, (f64, u64)> = HashMap::new();
-    let mut model: HashMap<String, (f64, u64, u64)> = HashMap::new();
+    let mut model: HashMap<String, (f64, u64, u64, u64, u64)> = HashMap::new();
+    let mut model_day: HashMap<String, HashMap<String, (f64, u64)>> = HashMap::new();
     let mut totals = UsageTotals::default();
     for r in records {
         let cost = record_cost(r, prices);
@@ -116,6 +120,15 @@ pub fn totalize(records: &[UsageRecord], prices: &PriceTable) -> UsageTotals {
         m.0 += cost;
         m.1 += r.input;
         m.2 += r.output;
+        m.3 += r.cache_write;
+        m.4 += r.cache_read;
+        let md = model_day
+            .entry(r.model.clone())
+            .or_default()
+            .entry(r.day.clone())
+            .or_default();
+        md.0 += cost;
+        md.1 += toks;
     }
     totals.by_day = day
         .into_iter()
@@ -128,18 +141,37 @@ pub fn totalize(records: &[UsageRecord], prices: &PriceTable) -> UsageTotals {
     totals.by_day.sort_by(|a, b| a.day.cmp(&b.day));
     totals.by_model = model
         .into_iter()
-        .map(|(model, (cost_usd, input, output))| ModelUsage {
-            model,
-            cost_usd,
-            input,
-            output,
-        })
+        .map(
+            |(model, (cost_usd, input, output, cache_write, cache_read))| ModelUsage {
+                model,
+                cost_usd,
+                input,
+                output,
+                cache_write,
+                cache_read,
+            },
+        )
         .collect();
     totals.by_model.sort_by(|a, b| {
         b.cost_usd
             .partial_cmp(&a.cost_usd)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+    totals.by_model_day = model_day
+        .into_iter()
+        .map(|(model, days)| {
+            let mut v: Vec<DayUsage> = days
+                .into_iter()
+                .map(|(day, (cost_usd, tokens))| DayUsage {
+                    day,
+                    cost_usd,
+                    tokens,
+                })
+                .collect();
+            v.sort_by(|a, b| a.day.cmp(&b.day));
+            (model, v)
+        })
+        .collect();
     totals
 }
 
@@ -244,5 +276,50 @@ mod tests {
         let totals = totalize(&recs, &PriceTable(map));
         assert!((totals.total_cost_usd - (1000.0 * 1e-6 + 100.0 * 5e-6)).abs() < 1e-12);
         assert_eq!(totals.fresh_input, 1000);
+    }
+
+    #[test]
+    fn per_model_cache_split_and_daily() {
+        let recs = vec![
+            UsageRecord {
+                day: "2026-06-22".into(),
+                model: "claude-x".into(),
+                input: 100,
+                output: 10,
+                cache_write: 5,
+                cache_read: 50,
+            },
+            UsageRecord {
+                day: "2026-06-23".into(),
+                model: "claude-x".into(),
+                input: 200,
+                output: 20,
+                cache_write: 0,
+                cache_read: 80,
+            },
+        ];
+        let mut map = HashMap::new();
+        map.insert(
+            "claude-x".to_string(),
+            ModelPrice {
+                input: 1e-6,
+                output: 5e-6,
+                cache_write: 0.0,
+                cache_read: 0.0,
+            },
+        );
+        let totals = totalize(&recs, &PriceTable(map));
+
+        let m = &totals.by_model[0];
+        assert_eq!(m.cache_write, 5);
+        assert_eq!(m.cache_read, 130);
+
+        let days = totals
+            .by_model_day
+            .get("claude-x")
+            .expect("model day history");
+        assert_eq!(days.len(), 2);
+        assert_eq!(days[0].day, "2026-06-22"); // ascending
+        assert_eq!(days[1].day, "2026-06-23");
     }
 }

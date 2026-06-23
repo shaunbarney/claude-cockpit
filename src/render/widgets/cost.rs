@@ -196,11 +196,14 @@ mod tests {
                 cost_usd: 1.23,
                 input: 100_000,
                 output: 50_000,
+                cache_write: 0,
+                cache_read: 0,
             }],
             total_cost_usd: 1.23,
             cache_read: 10_000,
             cache_write: 5_000,
             fresh_input: 85_000,
+            ..Default::default()
         };
 
         let mut term = Terminal::new(TestBackend::new(120, 16)).unwrap();

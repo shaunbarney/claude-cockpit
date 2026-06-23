@@ -145,11 +145,14 @@ mod tests {
                 cost_usd: 0.10,
                 input: 0,
                 output: 0,
+                cache_write: 0,
+                cache_read: 0,
             }],
             total_cost_usd: 0.10,
             cache_read: 900,
             cache_write: 100,
             fresh_input: 0,
+            ..Default::default()
         };
         let cadence = vec![
             ("2026-06-22".to_string(), 3u32),
