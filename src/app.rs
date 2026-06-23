@@ -38,6 +38,8 @@ pub enum Detail {
     Job(usize),
     Container(usize),
     Diff(DiffView),
+    Cost,
+    CostModel(usize),
 }
 
 /// The current screen.
@@ -108,6 +110,7 @@ impl App {
             View::Detail(Detail::Diff(_)) if self.last_wt_idx.is_some() => {
                 View::Detail(Detail::Worktree)
             }
+            View::Detail(Detail::CostModel(_)) => View::Detail(Detail::Cost),
             _ => View::Dashboard,
         };
     }

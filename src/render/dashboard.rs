@@ -6,6 +6,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 use crate::app::{App, Detail, View};
+use crate::collect::usage::DayUsage;
 use crate::layout::{band, cols_for, place, widgets_for, Band, FrameRects};
 use crate::render::widgets;
 use crate::theme::Theme;
@@ -78,6 +79,8 @@ fn draw_content(f: &mut Frame, app: &mut App) {
         Worktree,
         Diff,
         Container(usize),
+        Cost,
+        CostModel(usize),
         None,
     }
     let route = match &app.view {
@@ -85,6 +88,8 @@ fn draw_content(f: &mut Frame, app: &mut App) {
         View::Detail(Detail::Worktree) => DetailRoute::Worktree,
         View::Detail(Detail::Diff(_)) => DetailRoute::Diff,
         View::Detail(Detail::Container(i)) => DetailRoute::Container(*i),
+        View::Detail(Detail::Cost) => DetailRoute::Cost,
+        View::Detail(Detail::CostModel(i)) => DetailRoute::CostModel(*i),
         _ => DetailRoute::None,
     };
 
@@ -177,6 +182,59 @@ fn draw_content(f: &mut Frame, app: &mut App) {
                 &app.theme,
                 app.detail_scroll,
             );
+            let line = Line::from("  Esc back · ↑/↓ scroll · q quit");
+            f.render_widget(Paragraph::new(line).style(app.theme.dim_style()), outer[1]);
+            app.rects = FrameRects::default();
+            return;
+        }
+        DetailRoute::Cost => {
+            let outer = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
+            let usage = { app.data.lock().unwrap().usage.clone() };
+            match usage {
+                Some(u) => crate::render::detail::cost::render(
+                    f,
+                    outer[0],
+                    &u,
+                    &app.theme,
+                    &mut app.detail_table,
+                    &today,
+                ),
+                None => f.render_widget(
+                    Paragraph::new("no usage data — Esc to go back").style(app.theme.dim_style()),
+                    outer[0],
+                ),
+            }
+            let line = Line::from("  Esc back · ↑/↓ select · Enter model · q quit");
+            f.render_widget(Paragraph::new(line).style(app.theme.dim_style()), outer[1]);
+            app.rects = FrameRects::default();
+            return;
+        }
+        DetailRoute::CostModel(idx) => {
+            let outer = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
+            let usage = { app.data.lock().unwrap().usage.clone() };
+            match usage.as_ref().and_then(|u| u.by_model.get(idx)) {
+                Some(m) => {
+                    let empty: Vec<DayUsage> = Vec::new();
+                    let days = usage
+                        .as_ref()
+                        .and_then(|u| u.by_model_day.get(&m.model))
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&empty);
+                    crate::render::detail::cost::render_model(
+                        f,
+                        outer[0],
+                        m,
+                        days,
+                        &app.theme,
+                        app.detail_scroll,
+                    );
+                }
+                None => f.render_widget(
+                    Paragraph::new("model no longer present — Esc to go back")
+                        .style(app.theme.dim_style()),
+                    outer[0],
+                ),
+            }
             let line = Line::from("  Esc back · ↑/↓ scroll · q quit");
             f.render_widget(Paragraph::new(line).style(app.theme.dim_style()), outer[1]);
             app.rects = FrameRects::default();

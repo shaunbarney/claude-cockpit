@@ -161,6 +161,34 @@ fn open_container_detail(app: &mut App) {
     app.detail_scroll = 0;
 }
 
+fn open_cost_detail(app: &mut App) {
+    if app.data.lock().unwrap().usage.is_none() {
+        return;
+    }
+    app.detail_table = ratatui::widgets::TableState::default();
+    app.detail_table.select(Some(0));
+    app.detail_scroll = 0;
+    app.view = View::Detail(Detail::Cost);
+}
+
+fn open_cost_model(app: &mut App) {
+    let Some(sel) = app.detail_table.selected() else {
+        return;
+    };
+    let n = app
+        .data
+        .lock()
+        .unwrap()
+        .usage
+        .as_ref()
+        .map(|u| u.by_model.len())
+        .unwrap_or(0);
+    if sel < n {
+        app.view = View::Detail(Detail::CostModel(sel));
+        app.detail_scroll = 0;
+    }
+}
+
 fn open_file_diff(app: &mut App) {
     let Some(detail) = app.wt_detail.clone() else {
         return;
@@ -208,6 +236,10 @@ fn apply(app: &mut App, action: Action, root: &str) {
                 let s = app.detail_table.selected().unwrap_or(0);
                 app.detail_table.select(Some(s.saturating_sub(1)));
             }
+            View::Detail(Detail::Cost) => {
+                let s = app.detail_table.selected().unwrap_or(0);
+                app.detail_table.select(Some(s.saturating_sub(1)));
+            }
             View::Detail(_) => {
                 app.detail_scroll = app.detail_scroll.saturating_sub(1);
             }
@@ -216,6 +248,20 @@ fn apply(app: &mut App, action: Action, root: &str) {
         Action::Down => match &app.view {
             View::Detail(Detail::Worktree) => {
                 let n = wt_file_count(app);
+                if n > 0 {
+                    let s = app.detail_table.selected().unwrap_or(0);
+                    app.detail_table.select(Some((s + 1).min(n - 1)));
+                }
+            }
+            View::Detail(Detail::Cost) => {
+                let n = app
+                    .data
+                    .lock()
+                    .unwrap()
+                    .usage
+                    .as_ref()
+                    .map(|u| u.by_model.len())
+                    .unwrap_or(0);
                 if n > 0 {
                     let s = app.detail_table.selected().unwrap_or(0);
                     app.detail_table.select(Some((s + 1).min(n - 1)));
@@ -252,9 +298,11 @@ fn apply(app: &mut App, action: Action, root: &str) {
                     }
                 }
                 WidgetKind::Docker => open_container_detail(app),
+                WidgetKind::Cost => open_cost_detail(app),
                 _ => {}
             },
             View::Detail(Detail::Worktree) => open_file_diff(app),
+            View::Detail(Detail::Cost) => open_cost_model(app),
             _ => {}
         },
         Action::None => {}
