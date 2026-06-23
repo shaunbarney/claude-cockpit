@@ -22,7 +22,7 @@ use crate::widget::WidgetKind;
 use crate::refresh;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Action { Quit, Refresh, FocusNext, FocusPrev, Up, Down, Expand, Drill, Back, None }
+pub enum Action { Quit, Refresh, FocusNext, FocusPrev, Up, Down, Expand, Drill, Back, Help, None }
 
 /// Pure key -> action map.
 pub fn map_key(code: KeyCode, mods: KeyModifiers) -> Action {
@@ -37,6 +37,7 @@ pub fn map_key(code: KeyCode, mods: KeyModifiers) -> Action {
         KeyCode::Down | KeyCode::Char('j') => Action::Down,
         KeyCode::Char('e') => Action::Expand,
         KeyCode::Enter => Action::Drill,
+        KeyCode::Char('?') => Action::Help,
         _ => Action::None,
     }
 }
@@ -184,7 +185,14 @@ fn apply(app: &mut App, action: Action, root: &str) {
             _ => move_selection(app, true),
         },
         Action::Expand => app.expand_focused(),
-        Action::Back => app.back(),
+        Action::Help => app.show_help = !app.show_help,
+        Action::Back => {
+            if app.show_help {
+                app.show_help = false;
+            } else {
+                app.back();
+            }
+        }
         Action::Drill => match &app.view {
             View::Dashboard | View::Expanded(_) => match app.focus {
                 WidgetKind::Worktrees => open_worktree_detail(app),
