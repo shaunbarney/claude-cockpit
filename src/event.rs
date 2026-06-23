@@ -313,6 +313,19 @@ fn apply(app: &mut App, action: Action, root: &str) {
                         app.detail_scroll = 0;
                     }
                 }
+                WidgetKind::Ports => {
+                    if let Some(idx) = app
+                        .ui
+                        .get(&WidgetKind::Ports)
+                        .and_then(|u| u.table.selected())
+                    {
+                        let n = app.data.lock().unwrap().endpoints.len();
+                        if idx < n {
+                            app.view = View::Detail(Detail::Ports(idx));
+                            app.detail_scroll = 0;
+                        }
+                    }
+                }
                 _ => {}
             },
             View::Detail(Detail::Worktree) => open_file_diff(app),

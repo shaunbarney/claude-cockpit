@@ -42,6 +42,7 @@ pub enum Detail {
     CostModel(usize),
     Activity,
     Code,
+    Ports(usize),
 }
 
 /// The current screen.

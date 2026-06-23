@@ -83,6 +83,7 @@ fn draw_content(f: &mut Frame, app: &mut App) {
         CostModel(usize),
         Activity,
         Code,
+        Ports(usize),
         None,
     }
     let route = match &app.view {
@@ -94,6 +95,7 @@ fn draw_content(f: &mut Frame, app: &mut App) {
         View::Detail(Detail::CostModel(i)) => DetailRoute::CostModel(*i),
         View::Detail(Detail::Activity) => DetailRoute::Activity,
         View::Detail(Detail::Code) => DetailRoute::Code,
+        View::Detail(Detail::Ports(i)) => DetailRoute::Ports(*i),
         _ => DetailRoute::None,
     };
 
@@ -267,6 +269,22 @@ fn draw_content(f: &mut Frame, app: &mut App) {
             let outer = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
             let loc = { app.data.lock().unwrap().loc.clone() };
             crate::render::detail::code::render(f, outer[0], &loc, &app.theme);
+            let line = Line::from("  Esc back · q quit");
+            f.render_widget(Paragraph::new(line).style(app.theme.dim_style()), outer[1]);
+            app.rects = FrameRects::default();
+            return;
+        }
+        DetailRoute::Ports(idx) => {
+            let outer = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
+            let ep = { app.data.lock().unwrap().endpoints.get(idx).cloned() };
+            match ep {
+                Some(ep) => crate::render::detail::ports::render(f, outer[0], &ep, &app.theme),
+                None => f.render_widget(
+                    Paragraph::new("endpoint no longer present — Esc to go back")
+                        .style(app.theme.dim_style()),
+                    outer[0],
+                ),
+            }
             let line = Line::from("  Esc back · q quit");
             f.render_widget(Paragraph::new(line).style(app.theme.dim_style()), outer[1]);
             app.rects = FrameRects::default();
