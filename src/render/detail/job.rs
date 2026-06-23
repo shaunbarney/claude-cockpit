@@ -12,6 +12,23 @@ use crate::collect::jobs::{Job, JobEvent};
 use crate::theme::Theme;
 use crate::util::human_duration;
 
+/// Display string for a job's worktree: branch, else the worktree folder name, else "—".
+fn worktree_label(branch: Option<&str>, path: Option<&str>) -> String {
+    if let Some(b) = branch {
+        if !b.is_empty() {
+            return b.to_string();
+        }
+    }
+    if let Some(p) = path {
+        if let Some(name) = std::path::Path::new(p).file_name().and_then(|s| s.to_str()) {
+            if !name.is_empty() {
+                return name.to_string();
+            }
+        }
+    }
+    "—".to_string()
+}
+
 /// Colour a state string using theme semantics.
 fn state_style(state: &str, theme: &Theme) -> Style {
     match state {
@@ -49,8 +66,6 @@ fn render_header(f: &mut Frame, area: ratatui::layout::Rect, job: &Job, theme: &
     let state_sp = Span::styled(job.state.clone(), state_style(&job.state, theme));
     let tempo_sp = Span::styled(job.tempo.clone(), theme.dim_style());
 
-    let branch_val = job.worktree_branch.as_deref().unwrap_or("—");
-
     let duration_val = job
         .created_at
         .map(|c| human_duration((now - c).max(0) as u64))
@@ -60,14 +75,6 @@ fn render_header(f: &mut Frame, area: ratatui::layout::Rect, job: &Job, theme: &
         .map(|u| format!("{} ago", human_duration((now - u).max(0) as u64)))
         .unwrap_or_else(|| "—".to_string());
 
-    // Truncate intent for header; full text is visible in intent field anyway.
-    let intent_str = if job.intent.chars().count() > 80 {
-        let cut: String = job.intent.chars().take(79).collect();
-        format!("{cut}…")
-    } else {
-        job.intent.clone()
-    };
-
     let lines: Vec<Line> = vec![
         Line::from(vec![
             Span::raw("State: "),
@@ -75,14 +82,19 @@ fn render_header(f: &mut Frame, area: ratatui::layout::Rect, job: &Job, theme: &
             Span::raw("  Tempo: "),
             tempo_sp,
         ]),
-        Line::from(vec![Span::raw("Branch: "), Span::raw(branch_val)]),
+        Line::from(vec![
+            Span::raw("Worktree: "),
+            Span::raw(worktree_label(
+                job.worktree_branch.as_deref(),
+                job.worktree_path.as_deref(),
+            )),
+        ]),
         Line::from(vec![
             Span::raw("Duration: "),
             Span::raw(duration_val),
             Span::raw("   Updated: "),
             Span::styled(updated_val, theme.dim_style()),
         ]),
-        Line::from(vec![Span::raw("Intent: "), Span::raw(intent_str)]),
     ];
 
     let p = Paragraph::new(Text::from(lines)).block(block);
@@ -173,7 +185,7 @@ mod tests {
             queued: 1,
             cwd: "/repo".into(),
             worktree_path: Some("/repo/.claude/worktrees/governour-cockpit".into()),
-            worktree_branch: Some("worktree-governour-cockpit".into()),
+            worktree_branch: Some("feat/demo".into()),
             created_at: Some(1_000_000),
             updated_at: Some(1_000_060),
         }
@@ -220,6 +232,14 @@ mod tests {
         assert!(
             s.contains("GovernourCockpit"),
             "expected job name in buffer"
+        );
+        assert!(
+            s.contains("Worktree:"),
+            "expected 'Worktree:' label in header"
+        );
+        assert!(
+            s.contains("feat/demo"),
+            "expected worktree branch value in header"
         );
         assert!(
             s.contains("starting build"),

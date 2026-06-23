@@ -20,10 +20,27 @@ fn truncate(s: &str, max: usize) -> String {
     format!("{cut}…")
 }
 
+/// Display string for a job's worktree: branch, else the worktree folder name, else "—".
+fn worktree_label(branch: Option<&str>, path: Option<&str>) -> String {
+    if let Some(b) = branch {
+        if !b.is_empty() {
+            return b.to_string();
+        }
+    }
+    if let Some(p) = path {
+        if let Some(name) = std::path::Path::new(p).file_name().and_then(|s| s.to_str()) {
+            if !name.is_empty() {
+                return name.to_string();
+            }
+        }
+    }
+    "—".to_string()
+}
+
 /// Render the Jobs table into `area`.
 ///
-/// Columns (wide/medium): `● | Name | State | Tasks | Intent | Age`
-/// Compact band: drops `Tasks` and truncates Intent column.
+/// Columns (wide/medium): `● | Name | State | Tasks | Worktree | Age`
+/// Compact band: drops `Tasks` and truncates Worktree column.
 #[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
@@ -53,24 +70,24 @@ pub fn render(
         Constraint::Min(16),   // name
         Constraint::Length(9), // state
         Constraint::Length(8), // tasks
-        Constraint::Min(20),   // intent
+        Constraint::Min(20),   // worktree
         Constraint::Length(9), // age
     ];
     let compact_widths: &[Constraint] = &[
         Constraint::Length(2), // dot
         Constraint::Min(14),   // name
         Constraint::Length(9), // state
-        Constraint::Min(16),   // intent (truncated)
+        Constraint::Min(16),   // worktree (truncated)
         Constraint::Length(9), // age
     ];
 
     let widths = if compact { compact_widths } else { full_widths };
 
     let header = if compact {
-        Row::new(["", "Name", "State", "Intent", "Age"])
+        Row::new(["", "Name", "State", "Worktree", "Age"])
             .style(Style::new().add_modifier(Modifier::BOLD))
     } else {
-        Row::new(["", "Name", "State", "Tasks", "Intent", "Age"])
+        Row::new(["", "Name", "State", "Tasks", "Worktree", "Age"])
             .style(Style::new().add_modifier(Modifier::BOLD))
     };
 
@@ -117,13 +134,14 @@ pub fn render(
                 Cell::from(tasks_text)
             };
 
-            // Intent: truncate for compact.
-            let intent_str = if compact {
-                truncate(&j.intent, 20)
+            // Worktree: branch (or folder name), truncated to fit.
+            let wt_full = worktree_label(j.worktree_branch.as_deref(), j.worktree_path.as_deref());
+            let wt_str = if compact {
+                truncate(&wt_full, 20)
             } else {
-                truncate(&j.intent, 40)
+                truncate(&wt_full, 40)
             };
-            let intent_cell = Cell::from(intent_str);
+            let wt_cell = Cell::from(wt_str);
 
             // Age: "Xs ago" or dim dash.
             let age_cell = match j.updated_at {
@@ -138,15 +156,10 @@ pub fn render(
             };
 
             let cells: Vec<Cell> = if compact {
-                vec![dot_cell, name_cell, state_cell, intent_cell, age_cell]
+                vec![dot_cell, name_cell, state_cell, wt_cell, age_cell]
             } else {
                 vec![
-                    dot_cell,
-                    name_cell,
-                    state_cell,
-                    tasks_cell,
-                    intent_cell,
-                    age_cell,
+                    dot_cell, name_cell, state_cell, tasks_cell, wt_cell, age_cell,
                 ]
             };
 
@@ -185,7 +198,7 @@ mod tests {
             queued: 0,
             cwd: String::new(),
             worktree_path: None,
-            worktree_branch: None,
+            worktree_branch: Some("feat/demo".into()),
             created_at: Some(0),
             updated_at: Some(100),
         }
@@ -218,5 +231,13 @@ mod tests {
         let s = buffer_text(term.backend().buffer());
         assert!(s.contains("MyAgent"), "expected 'MyAgent' in buffer");
         assert!(s.contains("Jobs"), "expected 'Jobs' block title in buffer");
+        assert!(
+            s.contains("Worktree"),
+            "expected 'Worktree' header in buffer"
+        );
+        assert!(
+            s.contains("feat/demo"),
+            "expected worktree branch value in buffer"
+        );
     }
 }
