@@ -12,6 +12,42 @@ use crate::layout::Band;
 use crate::theme::Theme;
 use crate::util::thousands;
 
+/// Strip a leading "claude-" prefix so model names fit narrow columns.
+fn short_model(name: &str) -> String {
+    name.strip_prefix("claude-").unwrap_or(name).to_string()
+}
+
+/// Pick the widest header variant that fits `width` columns.
+fn header_line(
+    total: f64,
+    today_cost: f64,
+    cache_pct: u64,
+    width: u16,
+    theme: &Theme,
+) -> Line<'static> {
+    let full = format!("Total ${total:.2}  ·  Today ${today_cost:.2}  ·  cache-hit {cache_pct}%");
+    let med = format!("${total:.2} · today ${today_cost:.2} · {cache_pct}%");
+    let w = width as usize;
+    if full.chars().count() <= w {
+        Line::from(vec![
+            Span::styled(format!("Total ${total:.2}"), Style::new().fg(theme.accent)),
+            Span::raw(format!(
+                "  ·  Today ${today_cost:.2}  ·  cache-hit {cache_pct}%"
+            )),
+        ])
+    } else if med.chars().count() <= w {
+        Line::from(vec![
+            Span::styled(format!("${total:.2}"), Style::new().fg(theme.accent)),
+            Span::raw(format!(" · today ${today_cost:.2} · {cache_pct}%")),
+        ])
+    } else {
+        Line::from(Span::styled(
+            format!("${total:.2}"),
+            Style::new().fg(theme.accent),
+        ))
+    }
+}
+
 pub fn render(
     f: &mut Frame,
     area: Rect,
@@ -63,17 +99,6 @@ pub fn render(
         0
     };
 
-    // Header line.
-    let header = Line::from(vec![
-        Span::styled(
-            format!("Total ${:.2}", totals.total_cost_usd),
-            Style::new().fg(theme.accent),
-        ),
-        Span::raw(format!(
-            "  ·  Today ${today_cost:.2}  ·  cache-hit {cache_pct}%"
-        )),
-    ]);
-
     // Last up-to-14 by_day costs for the trend.
     let cost_values: Vec<f64> = {
         let days = &totals.by_day;
@@ -81,13 +106,19 @@ pub fn render(
         days[start..].iter().map(|d| d.cost_usd).collect()
     };
 
-    // Top 3 by_model rows.
-    let top_models: Vec<&ModelUsage> = totals.by_model.iter().take(3).collect();
-
     let inner = block.inner(area);
     f.render_widget(block, area);
 
     let compact = band == Band::Compact;
+
+    // Show as many models as vertically fit; the small dashboard cell stays tight,
+    // the full-screen Expanded view shows the whole breakdown.
+    let max_models = if compact {
+        3
+    } else {
+        (inner.height as usize).saturating_sub(4).clamp(1, 20)
+    };
+    let top_models: Vec<&ModelUsage> = totals.by_model.iter().take(max_models).collect();
 
     if compact {
         // Compact: header + model table stacked.
@@ -95,6 +126,13 @@ pub fn render(
         let cuts =
             Layout::vertical([Constraint::Length(1), Constraint::Min(rows_count)]).split(inner);
 
+        let header = header_line(
+            totals.total_cost_usd,
+            today_cost,
+            cache_pct,
+            cuts[0].width,
+            theme,
+        );
         f.render_widget(Paragraph::new(header), cuts[0]);
         render_model_table(f, cuts[1], &top_models, theme);
     } else {
@@ -111,6 +149,13 @@ pub fn render(
         ])
         .split(inner);
 
+        let header = header_line(
+            totals.total_cost_usd,
+            today_cost,
+            cache_pct,
+            cuts[0].width,
+            theme,
+        );
         f.render_widget(Paragraph::new(header), cuts[0]);
         render_chart(f, cuts[1], &cost_values, theme);
         render_model_table(f, cuts[2], &top_models, theme);
@@ -151,7 +196,7 @@ fn render_model_table(f: &mut Frame, area: Rect, models: &[&ModelUsage], theme: 
         .iter()
         .map(|m| {
             Row::new(vec![
-                m.model.clone(),
+                short_model(&m.model),
                 format!("${:.2}", m.cost_usd),
                 format!("{} out", thousands(m.output)),
             ])
@@ -161,7 +206,7 @@ fn render_model_table(f: &mut Frame, area: Rect, models: &[&ModelUsage], theme: 
     let table = Table::new(
         rows,
         &[
-            Constraint::Min(20),
+            Constraint::Min(8),
             Constraint::Length(8),
             Constraint::Length(12),
         ],
@@ -228,5 +273,62 @@ mod tests {
         let s = buffer_text(term.backend().buffer());
         assert!(s.contains("Cost"), "expected 'Cost' block title in buffer");
         assert!(s.contains("1.23"), "expected '1.23' total cost in buffer");
+    }
+
+    #[test]
+    fn narrow_width_does_not_panic_and_shows_total() {
+        let totals = UsageTotals {
+            by_day: vec![DayUsage {
+                day: "2026-06-23".into(),
+                cost_usd: 0.50,
+                tokens: 1000,
+            }],
+            by_model: vec![ModelUsage {
+                model: "claude-opus-4-8-some-very-long-model-name".into(),
+                cost_usd: 1.23,
+                input: 100_000,
+                output: 50_000,
+                cache_write: 0,
+                cache_read: 0,
+            }],
+            total_cost_usd: 1.23,
+            cache_read: 10_000,
+            cache_write: 5_000,
+            fresh_input: 85_000,
+            ..Default::default()
+        };
+
+        let mut term = Terminal::new(TestBackend::new(28, 10)).unwrap();
+        term.draw(|f| {
+            render(
+                f,
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 28,
+                    height: 10,
+                },
+                Some(&totals),
+                &Theme::default(),
+                false,
+                Band::Compact,
+                "2026-06-23",
+            );
+        })
+        .unwrap();
+
+        let s = buffer_text(term.backend().buffer());
+        // The compact header keeps the total visible even at 28 cols.
+        assert!(
+            s.contains("1.23"),
+            "expected total cost visible when narrow"
+        );
+        // The right border column must not be overwritten by header text.
+        let buf = term.backend().buffer();
+        assert_eq!(
+            buf.cell((27, 1)).map(|c| c.symbol().to_string()),
+            Some("│".to_string()),
+            "right border must be intact (no overflow)"
+        );
     }
 }
