@@ -54,6 +54,10 @@ pub fn publish_procs(
     data.lock().unwrap().procs = list;
 }
 
+pub fn publish_repo(data: &Arc<Mutex<DashboardData>>, h: crate::collect::git::RepoHealth) {
+    data.lock().unwrap().repo = Some(h);
+}
+
 /// One full gather + publish (used at startup and on `r`).
 pub fn refresh_now(root: &str, data: &Arc<Mutex<DashboardData>>) {
     git::fetch_origin(root);
@@ -69,6 +73,7 @@ pub fn refresh_now(root: &str, data: &Arc<Mutex<DashboardData>>) {
         data,
         crate::collect::ports::gather_endpoints(&crate::config::load()),
     );
+    publish_repo(data, git::repo_health(root));
 }
 
 /// Spawn the slow (10 s) refresh loop and a fast (2 s) jobs loop.

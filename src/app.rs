@@ -21,6 +21,7 @@ pub struct DashboardData {
     pub containers: Vec<crate::collect::docker::Container>,
     pub endpoints: Vec<crate::collect::ports::Endpoint>,
     pub procs: Vec<crate::collect::procs::Proc>,
+    pub repo: Option<crate::collect::git::RepoHealth>,
 }
 
 /// A scrollable in-app diff/log view.
@@ -47,6 +48,7 @@ pub struct App {
     pub rects: FrameRects,
     pub theme: Theme,
     pub should_quit: bool,
+    pub show_help: bool,
     pub detail_scroll: u16,
     pub detail_table: TableState,
     pub last_wt_idx: Option<usize>,
@@ -64,6 +66,7 @@ impl App {
             rects: FrameRects::default(),
             theme,
             should_quit: false,
+            show_help: false,
             detail_scroll: 0,
             detail_table: TableState::default(),
             last_wt_idx: None,

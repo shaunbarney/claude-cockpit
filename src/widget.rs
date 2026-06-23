@@ -10,6 +10,7 @@ impl WidgetKind {
         use WidgetKind::*;
         &[Worktrees, Jobs, Cost, Activity, Code, Docker, Ports, Procs, Repo]
     }
+    #[allow(dead_code)]
     pub fn title(self) -> &'static str {
         match self {
             WidgetKind::Worktrees => "Worktrees",

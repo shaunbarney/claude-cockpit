@@ -5,4 +5,5 @@ pub mod docker;
 pub mod jobs;
 pub mod ports;
 pub mod procs;
+pub mod repo;
 pub mod worktrees;

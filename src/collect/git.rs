@@ -96,6 +96,48 @@ pub fn gather_worktrees(root: &str) -> Vec<Worktree> {
     rows
 }
 
+/// Whole-repo git health vs origin/main.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepoHealth {
+    pub branch: String,
+    pub ahead: u32,
+    pub behind: u32,
+    pub stash: u32,
+    pub dirty: u32,
+    pub last_fetch_secs: Option<u64>,
+}
+
+/// Parse `git rev-list --left-right --count HEAD...origin/main` ("ahead<TAB>behind") -> (ahead, behind).
+pub fn parse_ahead_behind(s: &str) -> (u32, u32) {
+    let mut it = s.split_whitespace();
+    let ahead = it.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+    let behind = it.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+    (ahead, behind)
+}
+
+fn fetch_head_age(root: &str) -> Option<u64> {
+    let rel = git(&["-C", root, "rev-parse", "--git-path", "FETCH_HEAD"]);
+    let rel = rel.trim();
+    if rel.is_empty() { return None; }
+    let path = if std::path::Path::new(rel).is_absolute() {
+        std::path::PathBuf::from(rel)
+    } else {
+        std::path::Path::new(root).join(rel)
+    };
+    std::fs::metadata(path).ok()?.modified().ok()?.elapsed().ok().map(|d| d.as_secs())
+}
+
+/// Whole-repo git health vs origin/main (best-effort; zeros on failure).
+pub fn repo_health(root: &str) -> RepoHealth {
+    let branch = git(&["-C", root, "rev-parse", "--abbrev-ref", "HEAD"]).trim().to_string();
+    let (ahead, behind) = parse_ahead_behind(
+        &git(&["-C", root, "rev-list", "--left-right", "--count", "HEAD...origin/main"]),
+    );
+    let stash = git(&["-C", root, "stash", "list"]).lines().count() as u32;
+    let dirty = git(&["-C", root, "status", "--porcelain"]).lines().count() as u32;
+    RepoHealth { branch, ahead, behind, stash, dirty, last_fetch_secs: fetch_head_age(root) }
+}
+
 /// Sort key matching the Python `rank()`: (bucket, tiebreak).
 /// bucket 0 = ahead (most ahead first), 1 = dirty (most dirty first), 2 = clean.
 pub fn rank(r: &Worktree) -> (u8, i64) {
@@ -111,6 +153,13 @@ pub fn rank(r: &Worktree) -> (u8, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_ahead_behind() {
+        assert_eq!(parse_ahead_behind("3\t1"), (3, 1));
+        assert_eq!(parse_ahead_behind("0\t0"), (0, 0));
+        assert_eq!(parse_ahead_behind(""), (0, 0));
+    }
 
     #[test]
     fn parses_insertions_and_deletions() {

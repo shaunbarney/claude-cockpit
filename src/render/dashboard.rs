@@ -1,16 +1,53 @@
 //! Compose the widget grid for the current size band; dispatch to widget renderers.
 
-use ratatui::layout::{Alignment, Constraint, Flex, Layout};
+use ratatui::layout::{Alignment, Constraint, Flex, Layout, Rect};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 use crate::app::{App, Detail, View};
 use crate::layout::{band, cols_for, place, widgets_for, Band, FrameRects};
 use crate::render::widgets;
+use crate::theme::Theme;
 use crate::widget::WidgetKind;
 
 pub fn render(f: &mut Frame, app: &mut App) {
+    draw_content(f, app);
+    if app.show_help {
+        draw_help(f, f.area(), &app.theme.clone());
+    }
+}
+
+fn draw_help(f: &mut Frame, area: Rect, theme: &Theme) {
+    const W: u16 = 44;
+    const H: u16 = 12;
+    let x = area.x + area.width.saturating_sub(W) / 2;
+    let y = area.y + area.height.saturating_sub(H) / 2;
+    let w = W.min(area.width);
+    let h = H.min(area.height);
+    let popup = Rect { x, y, width: w, height: h };
+
+    let text = concat!(
+        "  Tab / ← →     focus widget\n",
+        "  ↑ ↓ / j k      select row / scroll\n",
+        "  Enter          drill in\n",
+        "  e              expand widget\n",
+        "  r              refresh now\n",
+        "  ?              toggle this help\n",
+        "  Esc            back / close\n",
+        "  q              quit",
+    );
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Keys ")
+        .border_style(ratatui::style::Style::new().fg(theme.accent));
+
+    f.render_widget(Clear, popup);
+    f.render_widget(Paragraph::new(text).block(block), popup);
+}
+
+fn draw_content(f: &mut Frame, app: &mut App) {
     let area = f.area();
 
     let now = chrono::Utc::now().timestamp();
@@ -157,6 +194,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let containers = data.containers.clone();
     let endpoints = data.endpoints.clone();
     let procs = data.procs.clone();
+    let repo = data.repo.clone();
     drop(data);
 
     for (kind, rect) in &placed {
@@ -236,13 +274,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
                     app.rects.table_offset = offset;
                 }
             }
-            other => {
-                let block = Block::default()
-                    .borders(Borders::ALL)
-                    .title(format!(" {} ", other.title()));
-                let p =
-                    Paragraph::new(Line::from("…")).block(block).style(theme.dim_style());
-                f.render_widget(p, *rect);
+            WidgetKind::Repo => {
+                widgets::repo::render(f, *rect, repo.as_ref(), &theme, focused);
             }
         }
     }
@@ -253,7 +286,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
 fn footer(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
     let n = { app.data.lock().unwrap().worktrees.len() };
     let line = Line::from(format!(
-        "  {} worktrees · Tab focus · e expand · r refresh · q quit",
+        "  {} worktrees · Tab focus · e expand · r refresh · ? help · q quit",
         n
     ));
     f.render_widget(Paragraph::new(line).style(app.theme.dim_style()), area);
