@@ -50,17 +50,18 @@ pub fn short_model(name: &str) -> String {
     name.strip_prefix("claude-").unwrap_or(name).to_string()
 }
 
-/// Display string for a job's worktree: branch, else the worktree folder name, else "—".
+/// Display string for a job's worktree: branch (sans redundant `worktree-` prefix),
+/// else the worktree folder name, else "—".
 pub fn worktree_label(branch: Option<&str>, path: Option<&str>) -> String {
     if let Some(b) = branch {
         if !b.is_empty() {
-            return b.to_string();
+            return b.strip_prefix("worktree-").unwrap_or(b).to_string();
         }
     }
     if let Some(p) = path {
         if let Some(name) = std::path::Path::new(p).file_name().and_then(|s| s.to_str()) {
             if !name.is_empty() {
-                return name.to_string();
+                return name.strip_prefix("worktree-").unwrap_or(name).to_string();
             }
         }
     }
@@ -85,5 +86,12 @@ mod tests {
     #[test]
     fn thousands_sep() {
         assert_eq!(thousands(12345), "12,345");
+    }
+    #[test]
+    fn worktree_label_strips_prefix() {
+        assert_eq!(worktree_label(Some("worktree-x"), None), "x");
+        assert_eq!(worktree_label(Some("feat/demo"), None), "feat/demo");
+        assert_eq!(worktree_label(None, Some("/repo/.claude/worktrees/y")), "y");
+        assert_eq!(worktree_label(None, None), "—");
     }
 }
