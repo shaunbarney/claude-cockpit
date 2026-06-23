@@ -27,6 +27,10 @@ pub enum Action {
     Refresh,
     FocusNext,
     FocusPrev,
+    FocusUp,
+    FocusDown,
+    FocusLeft,
+    FocusRight,
     Up,
     Down,
     Expand,
@@ -45,10 +49,14 @@ pub fn map_key(code: KeyCode, mods: KeyModifiers) -> Action {
         KeyCode::Char('q') => Action::Quit,
         KeyCode::Esc => Action::Back,
         KeyCode::Char('r') => Action::Refresh,
-        KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => Action::FocusNext,
-        KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => Action::FocusPrev,
-        KeyCode::Up | KeyCode::Char('k') => Action::Up,
-        KeyCode::Down | KeyCode::Char('j') => Action::Down,
+        KeyCode::Tab => Action::FocusNext,
+        KeyCode::BackTab => Action::FocusPrev,
+        KeyCode::Right | KeyCode::Char('l') => Action::FocusRight,
+        KeyCode::Left | KeyCode::Char('h') => Action::FocusLeft,
+        KeyCode::Up => Action::FocusUp,
+        KeyCode::Down => Action::FocusDown,
+        KeyCode::Char('k') => Action::Up,
+        KeyCode::Char('j') => Action::Down,
         KeyCode::Char('e') => Action::Expand,
         KeyCode::Enter => Action::Drill,
         KeyCode::Char('?') => Action::Help,
@@ -213,6 +221,102 @@ fn open_file_diff(app: &mut App) {
     app.detail_scroll = 0;
 }
 
+#[derive(Clone, Copy)]
+enum Dir {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+/// Move focus to the nearest widget in `dir`, using the current frame's widget rects
+/// (`app.rects.widgets`). No-op if there is no widget in that direction.
+fn focus_dir(app: &mut App, dir: Dir) {
+    let cur = app.focus;
+    let target = {
+        let rects = &app.rects.widgets;
+        let Some(cur_rect) = rects.iter().find(|(k, _)| *k == cur).map(|(_, r)| *r) else {
+            return;
+        };
+        let cx = cur_rect.x as i32 + cur_rect.width as i32 / 2;
+        let cy = cur_rect.y as i32 + cur_rect.height as i32 / 2;
+        let mut best: Option<WidgetKind> = None;
+        let mut best_score = i32::MAX;
+        for (k, r) in rects {
+            if *k == cur {
+                continue;
+            }
+            let rx = r.x as i32 + r.width as i32 / 2;
+            let ry = r.y as i32 + r.height as i32 / 2;
+            // primary = distance along the travel axis, secondary = off-axis offset.
+            let (primary, secondary, valid) = match dir {
+                Dir::Down => (ry - cy, (rx - cx).abs(), ry > cy),
+                Dir::Up => (cy - ry, (rx - cx).abs(), ry < cy),
+                Dir::Right => (rx - cx, (ry - cy).abs(), rx > cx),
+                Dir::Left => (cx - rx, (ry - cy).abs(), rx < cx),
+            };
+            if !valid {
+                continue;
+            }
+            let score = primary * 4 + secondary;
+            if score < best_score {
+                best_score = score;
+                best = Some(*k);
+            }
+        }
+        best
+    };
+    if let Some(k) = target {
+        app.focus = k;
+    }
+}
+
+/// In-widget "up": detail row-select / scroll, or dashboard table row-select.
+/// Driven by `k`, and by the arrow keys when not on the dashboard grid.
+fn select_up(app: &mut App) {
+    match &app.view {
+        View::Detail(Detail::Worktree) | View::Detail(Detail::Cost) => {
+            let s = app.detail_table.selected().unwrap_or(0);
+            app.detail_table.select(Some(s.saturating_sub(1)));
+        }
+        View::Detail(_) => {
+            app.detail_scroll = app.detail_scroll.saturating_sub(1);
+        }
+        _ => move_selection(app, false),
+    }
+}
+
+/// In-widget "down": counterpart to [`select_up`].
+fn select_down(app: &mut App) {
+    match &app.view {
+        View::Detail(Detail::Worktree) => {
+            let n = wt_file_count(app);
+            if n > 0 {
+                let s = app.detail_table.selected().unwrap_or(0);
+                app.detail_table.select(Some((s + 1).min(n - 1)));
+            }
+        }
+        View::Detail(Detail::Cost) => {
+            let n = app
+                .data
+                .lock()
+                .unwrap()
+                .usage
+                .as_ref()
+                .map(|u| u.by_model.len())
+                .unwrap_or(0);
+            if n > 0 {
+                let s = app.detail_table.selected().unwrap_or(0);
+                app.detail_table.select(Some((s + 1).min(n - 1)));
+            }
+        }
+        View::Detail(_) => {
+            app.detail_scroll = app.detail_scroll.saturating_add(1);
+        }
+        _ => move_selection(app, true),
+    }
+}
+
 fn apply(app: &mut App, action: Action, root: &str) {
     match action {
         Action::Quit => app.should_quit = true,
@@ -231,47 +335,32 @@ fn apply(app: &mut App, action: Action, root: &str) {
         }
         Action::FocusNext => app.focus_next(),
         Action::FocusPrev => app.focus_prev(),
-        Action::Up => match &app.view {
-            View::Detail(Detail::Worktree) => {
-                let s = app.detail_table.selected().unwrap_or(0);
-                app.detail_table.select(Some(s.saturating_sub(1)));
+        Action::FocusUp => {
+            if matches!(app.view, View::Dashboard) {
+                focus_dir(app, Dir::Up);
+            } else {
+                select_up(app);
             }
-            View::Detail(Detail::Cost) => {
-                let s = app.detail_table.selected().unwrap_or(0);
-                app.detail_table.select(Some(s.saturating_sub(1)));
+        }
+        Action::FocusDown => {
+            if matches!(app.view, View::Dashboard) {
+                focus_dir(app, Dir::Down);
+            } else {
+                select_down(app);
             }
-            View::Detail(_) => {
-                app.detail_scroll = app.detail_scroll.saturating_sub(1);
+        }
+        Action::FocusLeft => {
+            if matches!(app.view, View::Dashboard) {
+                focus_dir(app, Dir::Left);
             }
-            _ => move_selection(app, false),
-        },
-        Action::Down => match &app.view {
-            View::Detail(Detail::Worktree) => {
-                let n = wt_file_count(app);
-                if n > 0 {
-                    let s = app.detail_table.selected().unwrap_or(0);
-                    app.detail_table.select(Some((s + 1).min(n - 1)));
-                }
+        }
+        Action::FocusRight => {
+            if matches!(app.view, View::Dashboard) {
+                focus_dir(app, Dir::Right);
             }
-            View::Detail(Detail::Cost) => {
-                let n = app
-                    .data
-                    .lock()
-                    .unwrap()
-                    .usage
-                    .as_ref()
-                    .map(|u| u.by_model.len())
-                    .unwrap_or(0);
-                if n > 0 {
-                    let s = app.detail_table.selected().unwrap_or(0);
-                    app.detail_table.select(Some((s + 1).min(n - 1)));
-                }
-            }
-            View::Detail(_) => {
-                app.detail_scroll = app.detail_scroll.saturating_add(1);
-            }
-            _ => move_selection(app, true),
-        },
+        }
+        Action::Up => select_up(app),
+        Action::Down => select_down(app),
         Action::Expand => app.expand_focused(),
         Action::Help => app.show_help = !app.show_help,
         Action::Back => {
@@ -451,6 +540,57 @@ mod tests {
             map_key(KeyCode::Enter, KeyModifiers::NONE),
             Action::Drill
         ));
+        // Arrows move focus between widgets; j/k select rows within one.
+        assert!(matches!(
+            map_key(KeyCode::Down, KeyModifiers::NONE),
+            Action::FocusDown
+        ));
+        assert!(matches!(
+            map_key(KeyCode::Left, KeyModifiers::NONE),
+            Action::FocusLeft
+        ));
+        assert!(matches!(
+            map_key(KeyCode::Char('j'), KeyModifiers::NONE),
+            Action::Down
+        ));
+        assert!(matches!(
+            map_key(KeyCode::Char('k'), KeyModifiers::NONE),
+            Action::Up
+        ));
+    }
+
+    #[test]
+    fn arrows_move_focus_spatially() {
+        let mut app = App::new(Theme::default());
+        // Two widgets stacked vertically: Worktrees on top, Jobs below.
+        app.rects.widgets = vec![
+            (
+                WidgetKind::Worktrees,
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 40,
+                    height: 10,
+                },
+            ),
+            (
+                WidgetKind::Jobs,
+                Rect {
+                    x: 0,
+                    y: 10,
+                    width: 40,
+                    height: 10,
+                },
+            ),
+        ];
+        app.focus = WidgetKind::Worktrees;
+        apply(&mut app, Action::FocusDown, ".");
+        assert_eq!(app.focus, WidgetKind::Jobs);
+        apply(&mut app, Action::FocusUp, ".");
+        assert_eq!(app.focus, WidgetKind::Worktrees);
+        // Nothing to the left → focus stays put.
+        apply(&mut app, Action::FocusLeft, ".");
+        assert_eq!(app.focus, WidgetKind::Worktrees);
     }
     #[test]
     fn row_at_maps_clicks() {

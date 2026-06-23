@@ -34,13 +34,13 @@ fn draw_help(f: &mut Frame, area: Rect, theme: &Theme) {
     };
 
     let text = concat!(
-        "  Tab / ← →     focus widget\n",
-        "  ↑ ↓ / j k      select row / scroll\n",
+        "  ↑ ↓ ← →        move between widgets\n",
+        "  Tab            cycle focus\n",
+        "  j / k          select row in table\n",
         "  Enter          drill in\n",
         "  e              expand widget\n",
         "  r              refresh now\n",
-        "  ?              toggle this help\n",
-        "  Esc            back / close\n",
+        "  ?  help    Esc  back\n",
         "  q              quit",
     );
 
@@ -455,7 +455,7 @@ fn draw_content(f: &mut Frame, app: &mut App) {
 fn footer(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
     let n = { app.data.lock().unwrap().worktrees.len() };
     let line = Line::from(format!(
-        "  {} worktrees · Tab focus · e expand · r refresh · ? help · q quit",
+        "  {} worktrees · ↑↓←→ move · e expand · r refresh · ? help · q quit",
         n
     ));
     f.render_widget(Paragraph::new(line).style(app.theme.dim_style()), area);
