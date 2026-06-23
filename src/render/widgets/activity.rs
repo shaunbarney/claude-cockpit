@@ -36,30 +36,30 @@ pub fn render(
     // -- Cache efficiency section --
     let (cache_line, read_ratio) = if let Some(t) = cache {
         let total = t.cache_read + t.cache_write + t.fresh_input;
-        if total == 0 {
-            (
+        match (t.cache_read * 100).checked_div(total) {
+            None => (
                 Line::from(Span::styled("no usage yet", theme.dim_style())),
                 None,
-            )
-        } else {
-            let read_pct = t.cache_read * 100 / total;
-            let ratio = t.cache_read as f64 / total as f64;
-            let pct_style = if read_pct >= 50 {
-                Style::new().fg(theme.ok)
-            } else {
-                Style::new().fg(theme.warn)
-            };
-            let line = Line::from(vec![
-                Span::raw("cache-hit "),
-                Span::styled(format!("{read_pct}%"), pct_style),
-                Span::raw(format!(
-                    "  ·  read {}  write {}  fresh {}",
-                    thousands(t.cache_read),
-                    thousands(t.cache_write),
-                    thousands(t.fresh_input),
-                )),
-            ]);
-            (line, Some((read_pct, ratio)))
+            ),
+            Some(read_pct) => {
+                let ratio = t.cache_read as f64 / total as f64;
+                let pct_style = if read_pct >= 50 {
+                    Style::new().fg(theme.ok)
+                } else {
+                    Style::new().fg(theme.warn)
+                };
+                let line = Line::from(vec![
+                    Span::raw("cache-hit "),
+                    Span::styled(format!("{read_pct}%"), pct_style),
+                    Span::raw(format!(
+                        "  ·  read {}  write {}  fresh {}",
+                        thousands(t.cache_read),
+                        thousands(t.cache_write),
+                        thousands(t.fresh_input),
+                    )),
+                ]);
+                (line, Some((read_pct, ratio)))
+            }
         }
     } else {
         (

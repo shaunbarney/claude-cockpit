@@ -88,11 +88,9 @@ pub fn render(
 
     // Cache-hit %.
     let total_tokens = totals.cache_read + totals.cache_write + totals.fresh_input;
-    let cache_pct = if total_tokens > 0 {
-        totals.cache_read * 100 / total_tokens
-    } else {
-        0
-    };
+    let cache_pct = (totals.cache_read * 100)
+        .checked_div(total_tokens)
+        .unwrap_or(0);
 
     // Last up-to-14 by_day costs for the trend.
     let cost_values: Vec<f64> = {

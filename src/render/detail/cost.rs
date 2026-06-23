@@ -13,12 +13,7 @@ use crate::util::{short_model, thousands};
 /// cache-read share of (input + cache-write + cache-read), as a percent. Output is
 /// excluded to match the dashboard's cache-hit semantics.
 fn cache_hit(input: u64, cw: u64, cr: u64) -> u64 {
-    let total = input + cw + cr;
-    if total == 0 {
-        0
-    } else {
-        cr * 100 / total
-    }
+    (cr * 100).checked_div(input + cw + cr).unwrap_or(0)
 }
 
 /// All-models breakdown with a selectable model table.

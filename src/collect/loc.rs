@@ -41,7 +41,7 @@ pub fn loc_rows(root: &str) -> Vec<LocRow> {
         })
         .filter(|r| r.code > 0)
         .collect();
-    rows.sort_by(|a, b| b.code.cmp(&a.code));
+    rows.sort_by_key(|b| std::cmp::Reverse(b.code));
     rows
 }
 
