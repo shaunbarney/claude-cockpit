@@ -1,4 +1,5 @@
 //! Data collectors (IO-bound). Each gathers a domain snapshot.
+pub mod activity;
 pub mod git;
 pub mod git_detail;
 pub mod jobs;

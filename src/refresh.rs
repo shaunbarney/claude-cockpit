@@ -29,12 +29,20 @@ pub fn publish_usage(
     data.lock().unwrap().usage = Some(totals);
 }
 
+pub fn publish_activity(data: &Arc<Mutex<DashboardData>>, counts: Vec<(String, u32)>) {
+    data.lock().unwrap().activity = counts;
+}
+
 /// One full gather + publish (used at startup and on `r`).
 pub fn refresh_now(root: &str, data: &Arc<Mutex<DashboardData>>) {
     git::fetch_origin(root);
     publish_worktrees(data, git::gather_worktrees(root));
     publish_loc(data, loc::loc_rows(root));
     publish_jobs(data, jobs::gather_jobs());
+    publish_activity(
+        data,
+        crate::collect::activity::daily_counts(&crate::collect::activity::read_history()),
+    );
 }
 
 /// Spawn the slow (10 s) refresh loop and a fast (2 s) jobs loop.

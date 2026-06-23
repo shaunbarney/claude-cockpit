@@ -17,6 +17,7 @@ pub struct DashboardData {
     pub loc: Vec<LocRow>,
     pub jobs: Vec<crate::collect::jobs::Job>,
     pub usage: Option<crate::collect::usage::UsageTotals>,
+    pub activity: Vec<(String, u32)>,
 }
 
 /// A scrollable in-app diff/log view.

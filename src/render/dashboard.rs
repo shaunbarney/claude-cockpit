@@ -129,6 +129,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let loc = data.loc.clone();
     let jobs = data.jobs.clone();
     let usage = data.usage.clone();
+    let activity = data.activity.clone();
     drop(data);
 
     for (kind, rect) in &placed {
@@ -166,6 +167,11 @@ pub fn render(f: &mut Frame, app: &mut App) {
             }
             WidgetKind::Cost => {
                 widgets::cost::render(f, *rect, usage.as_ref(), &theme, focused, b, &today);
+            }
+            WidgetKind::Activity => {
+                widgets::activity::render(
+                    f, *rect, usage.as_ref(), &activity, &theme, focused, b,
+                );
             }
             other => {
                 let block = Block::default()
