@@ -33,6 +33,13 @@ pub fn publish_activity(data: &Arc<Mutex<DashboardData>>, counts: Vec<(String, u
     data.lock().unwrap().activity = counts;
 }
 
+pub fn publish_containers(
+    data: &Arc<Mutex<DashboardData>>,
+    list: Vec<crate::collect::docker::Container>,
+) {
+    data.lock().unwrap().containers = list;
+}
+
 /// One full gather + publish (used at startup and on `r`).
 pub fn refresh_now(root: &str, data: &Arc<Mutex<DashboardData>>) {
     git::fetch_origin(root);
@@ -43,6 +50,7 @@ pub fn refresh_now(root: &str, data: &Arc<Mutex<DashboardData>>) {
         data,
         crate::collect::activity::daily_counts(&crate::collect::activity::read_history()),
     );
+    publish_containers(data, crate::collect::docker::gather_containers());
 }
 
 /// Spawn the slow (10 s) refresh loop and a fast (2 s) jobs loop.
@@ -50,7 +58,7 @@ pub fn refresh_now(root: &str, data: &Arc<Mutex<DashboardData>>) {
 pub fn spawn(root: String, data: Arc<Mutex<DashboardData>>) -> Arc<AtomicBool> {
     let stop = Arc::new(AtomicBool::new(false));
 
-    // Slow thread: full refresh every 10 s.
+    // Slow thread: full refresh every 10 s (includes docker).
     let s = stop.clone();
     let root2 = root.clone();
     let data2 = data.clone();

@@ -32,11 +32,12 @@ pub fn render(f: &mut Frame, app: &mut App) {
     }
 
     // Detail routing: classify the view without holding a borrow across mutable calls.
-    enum DetailRoute { Job(usize), Worktree, Diff, None }
+    enum DetailRoute { Job(usize), Worktree, Diff, Container(usize), None }
     let route = match &app.view {
         View::Detail(Detail::Job(i)) => DetailRoute::Job(*i),
         View::Detail(Detail::Worktree(_)) => DetailRoute::Worktree,
         View::Detail(Detail::Diff(_)) => DetailRoute::Diff,
+        View::Detail(Detail::Container(i)) => DetailRoute::Container(*i),
         _ => DetailRoute::None,
     };
 
@@ -101,6 +102,29 @@ pub fn render(f: &mut Frame, app: &mut App) {
             app.rects = FrameRects::default();
             return;
         }
+        DetailRoute::Container(idx) => {
+            let outer = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
+            let name = app
+                .data
+                .lock()
+                .unwrap()
+                .containers
+                .get(idx)
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| "unknown".to_string());
+            crate::render::detail::container::render(
+                f,
+                outer[0],
+                &name,
+                &app.container_logs,
+                &app.theme,
+                app.detail_scroll,
+            );
+            let line = Line::from("  Esc back · ↑/↓ scroll · q quit");
+            f.render_widget(Paragraph::new(line).style(app.theme.dim_style()), outer[1]);
+            app.rects = FrameRects::default();
+            return;
+        }
         DetailRoute::None => {}
     }
 
@@ -130,6 +154,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let jobs = data.jobs.clone();
     let usage = data.usage.clone();
     let activity = data.activity.clone();
+    let containers = data.containers.clone();
     drop(data);
 
     for (kind, rect) in &placed {
@@ -172,6 +197,18 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 widgets::activity::render(
                     f, *rect, usage.as_ref(), &activity, &theme, focused, b,
                 );
+            }
+            WidgetKind::Docker => {
+                let offset = {
+                    let st = app.ui.entry(WidgetKind::Docker).or_default();
+                    widgets::docker::render(f, *rect, &containers, &theme, focused, b, &mut st.table);
+                    st.table.offset()
+                };
+                if focused {
+                    app.rects.table_inner =
+                        Some(Block::default().borders(Borders::ALL).inner(*rect));
+                    app.rects.table_offset = offset;
+                }
             }
             other => {
                 let block = Block::default()

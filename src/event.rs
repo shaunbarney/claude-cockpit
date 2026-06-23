@@ -52,12 +52,13 @@ fn row_count(app: &App, kind: WidgetKind) -> usize {
     match kind {
         WidgetKind::Worktrees => app.data.lock().unwrap().worktrees.len(),
         WidgetKind::Jobs => app.data.lock().unwrap().jobs.len(),
+        WidgetKind::Docker => app.data.lock().unwrap().containers.len(),
         _ => 0, // extended per phase as more widgets become selectable
     }
 }
 
 fn is_table_widget(kind: WidgetKind) -> bool {
-    matches!(kind, WidgetKind::Worktrees | WidgetKind::Jobs)
+    matches!(kind, WidgetKind::Worktrees | WidgetKind::Jobs | WidgetKind::Docker)
 }
 
 fn move_selection(app: &mut App, down: bool) {
@@ -100,6 +101,17 @@ fn open_worktree_detail(app: &mut App) {
     app.detail_table = ratatui::widgets::TableState::default();
     app.detail_table.select(Some(0));
     app.view = View::Detail(Detail::Worktree(idx));
+}
+
+fn open_container_detail(app: &mut App) {
+    let Some(idx) = app.ui.get(&WidgetKind::Docker).and_then(|u| u.table.selected()) else {
+        return;
+    };
+    let c = app.data.lock().unwrap().containers.get(idx).cloned();
+    let Some(c) = c else { return };
+    app.container_logs = crate::collect::docker::container_logs(&c.id, 300);
+    app.view = View::Detail(Detail::Container(idx));
+    app.detail_scroll = 0;
 }
 
 fn open_file_diff(app: &mut App) {
@@ -178,6 +190,7 @@ fn apply(app: &mut App, action: Action, root: &str) {
                         }
                     }
                 }
+                WidgetKind::Docker => open_container_detail(app),
                 _ => {}
             },
             View::Detail(Detail::Worktree(_)) => open_file_diff(app),

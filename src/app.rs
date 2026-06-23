@@ -18,6 +18,7 @@ pub struct DashboardData {
     pub jobs: Vec<crate::collect::jobs::Job>,
     pub usage: Option<crate::collect::usage::UsageTotals>,
     pub activity: Vec<(String, u32)>,
+    pub containers: Vec<crate::collect::docker::Container>,
 }
 
 /// A scrollable in-app diff/log view.
@@ -48,6 +49,7 @@ pub struct App {
     pub detail_table: TableState,
     pub last_wt_idx: Option<usize>,
     pub wt_detail: Option<crate::collect::git_detail::WorktreeDetail>,
+    pub container_logs: Vec<String>,
 }
 
 impl App {
@@ -64,6 +66,7 @@ impl App {
             detail_table: TableState::default(),
             last_wt_idx: None,
             wt_detail: None,
+            container_logs: Vec::new(),
         }
     }
     pub fn focus_next(&mut self) { self.focus = self.focus.next(); }
