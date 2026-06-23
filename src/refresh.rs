@@ -47,6 +47,13 @@ pub fn publish_endpoints(
     data.lock().unwrap().endpoints = list;
 }
 
+pub fn publish_procs(
+    data: &Arc<Mutex<DashboardData>>,
+    list: Vec<crate::collect::procs::Proc>,
+) {
+    data.lock().unwrap().procs = list;
+}
+
 /// One full gather + publish (used at startup and on `r`).
 pub fn refresh_now(root: &str, data: &Arc<Mutex<DashboardData>>) {
     git::fetch_origin(root);
@@ -86,15 +93,21 @@ pub fn spawn(root: String, data: Arc<Mutex<DashboardData>>) -> Arc<AtomicBool> {
         }
     });
 
-    // Fast thread: jobs + endpoints refresh every 2 s (20 × 100 ms ticks).
+    // Fast thread: jobs + endpoints + procs refresh every 2 s (20 × 100 ms ticks).
+    // sys is kept alive across iterations so sysinfo can compute CPU% properly.
     let s = stop.clone();
     let data3 = data.clone();
     thread::spawn(move || {
+        let mut sys = sysinfo::System::new();
         while !s.load(Ordering::Relaxed) {
             publish_jobs(&data3, jobs::gather_jobs());
             publish_endpoints(
                 &data3,
                 crate::collect::ports::gather_endpoints(&crate::config::load()),
+            );
+            publish_procs(
+                &data3,
+                crate::collect::procs::gather_procs(&mut sys, &crate::config::load().processes),
             );
             for _ in 0..20 {
                 if s.load(Ordering::Relaxed) {

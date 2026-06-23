@@ -156,6 +156,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let activity = data.activity.clone();
     let containers = data.containers.clone();
     let endpoints = data.endpoints.clone();
+    let procs = data.procs.clone();
     drop(data);
 
     for (kind, rect) in &placed {
@@ -215,6 +216,18 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 let offset = {
                     let st = app.ui.entry(WidgetKind::Ports).or_default();
                     widgets::ports::render(f, *rect, &endpoints, &theme, focused, b, &mut st.table);
+                    st.table.offset()
+                };
+                if focused {
+                    app.rects.table_inner =
+                        Some(Block::default().borders(Borders::ALL).inner(*rect));
+                    app.rects.table_offset = offset;
+                }
+            }
+            WidgetKind::Procs => {
+                let offset = {
+                    let st = app.ui.entry(WidgetKind::Procs).or_default();
+                    widgets::procs::render(f, *rect, &procs, &theme, focused, b, &mut st.table);
                     st.table.offset()
                 };
                 if focused {

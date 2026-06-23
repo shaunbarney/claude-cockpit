@@ -4,4 +4,5 @@ pub mod cost;
 pub mod docker;
 pub mod jobs;
 pub mod ports;
+pub mod procs;
 pub mod worktrees;

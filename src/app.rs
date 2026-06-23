@@ -20,6 +20,7 @@ pub struct DashboardData {
     pub activity: Vec<(String, u32)>,
     pub containers: Vec<crate::collect::docker::Container>,
     pub endpoints: Vec<crate::collect::ports::Endpoint>,
+    pub procs: Vec<crate::collect::procs::Proc>,
 }
 
 /// A scrollable in-app diff/log view.
