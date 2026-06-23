@@ -10,24 +10,7 @@ use ratatui::Frame;
 
 use crate::collect::jobs::{Job, JobEvent};
 use crate::theme::Theme;
-use crate::util::human_duration;
-
-/// Display string for a job's worktree: branch, else the worktree folder name, else "—".
-fn worktree_label(branch: Option<&str>, path: Option<&str>) -> String {
-    if let Some(b) = branch {
-        if !b.is_empty() {
-            return b.to_string();
-        }
-    }
-    if let Some(p) = path {
-        if let Some(name) = std::path::Path::new(p).file_name().and_then(|s| s.to_str()) {
-            if !name.is_empty() {
-                return name.to_string();
-            }
-        }
-    }
-    "—".to_string()
-}
+use crate::util::{human_duration, worktree_label};
 
 /// Colour a state string using theme semantics.
 fn state_style(state: &str, theme: &Theme) -> Style {

@@ -45,6 +45,28 @@ pub fn thousands(n: u64) -> String {
     out
 }
 
+/// Strip a leading "claude-" prefix so model names fit narrow columns.
+pub fn short_model(name: &str) -> String {
+    name.strip_prefix("claude-").unwrap_or(name).to_string()
+}
+
+/// Display string for a job's worktree: branch, else the worktree folder name, else "—".
+pub fn worktree_label(branch: Option<&str>, path: Option<&str>) -> String {
+    if let Some(b) = branch {
+        if !b.is_empty() {
+            return b.to_string();
+        }
+    }
+    if let Some(p) = path {
+        if let Some(name) = std::path::Path::new(p).file_name().and_then(|s| s.to_str()) {
+            if !name.is_empty() {
+                return name.to_string();
+            }
+        }
+    }
+    "—".to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

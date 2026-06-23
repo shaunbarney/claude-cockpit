@@ -10,12 +10,7 @@ use ratatui::Frame;
 use crate::collect::usage::{DayUsage, ModelUsage, UsageTotals};
 use crate::layout::Band;
 use crate::theme::Theme;
-use crate::util::thousands;
-
-/// Strip a leading "claude-" prefix so model names fit narrow columns.
-fn short_model(name: &str) -> String {
-    name.strip_prefix("claude-").unwrap_or(name).to_string()
-}
+use crate::util::{short_model, thousands};
 
 /// Pick the widest header variant that fits `width` columns.
 fn header_line(

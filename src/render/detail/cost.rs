@@ -8,12 +8,7 @@ use ratatui::Frame;
 
 use crate::collect::usage::{DayUsage, ModelUsage, UsageTotals};
 use crate::theme::Theme;
-use crate::util::thousands;
-
-/// Strip a leading "claude-" prefix for compactness.
-fn short_model(name: &str) -> String {
-    name.strip_prefix("claude-").unwrap_or(name).to_string()
-}
+use crate::util::{short_model, thousands};
 
 /// cache-read share of (input + cache-write + cache-read), as a percent. Output is
 /// excluded to match the dashboard's cache-hit semantics.

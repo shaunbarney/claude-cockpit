@@ -9,7 +9,7 @@ use ratatui::Frame;
 use crate::collect::jobs::Job;
 use crate::layout::Band;
 use crate::theme::Theme;
-use crate::util::human_duration;
+use crate::util::{human_duration, worktree_label};
 
 /// Truncate `s` to at most `max` chars, appending `…` if it was cut.
 fn truncate(s: &str, max: usize) -> String {
@@ -18,23 +18,6 @@ fn truncate(s: &str, max: usize) -> String {
     }
     let cut: String = s.chars().take(max.saturating_sub(1)).collect();
     format!("{cut}…")
-}
-
-/// Display string for a job's worktree: branch, else the worktree folder name, else "—".
-fn worktree_label(branch: Option<&str>, path: Option<&str>) -> String {
-    if let Some(b) = branch {
-        if !b.is_empty() {
-            return b.to_string();
-        }
-    }
-    if let Some(p) = path {
-        if let Some(name) = std::path::Path::new(p).file_name().and_then(|s| s.to_str()) {
-            if !name.is_empty() {
-                return name.to_string();
-            }
-        }
-    }
-    "—".to_string()
 }
 
 /// Render the Jobs table into `area`.
