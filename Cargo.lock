@@ -269,6 +269,7 @@ dependencies = [
  "serde_json",
  "sysinfo",
  "tokei",
+ "toml",
  "ureq",
 ]
 

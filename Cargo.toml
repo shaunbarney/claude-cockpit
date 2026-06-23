@@ -27,6 +27,7 @@ sysinfo = "0.32"
 ureq = { version = "2", default-features = false, features = ["tls"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 dirs = "5"
+toml = "0.8"
 
 [profile.release]
 opt-level = 3

@@ -1,5 +1,6 @@
 mod app;
 mod collect;
+mod config;
 mod event;
 mod graph;
 mod layout;
