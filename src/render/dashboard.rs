@@ -14,6 +14,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let area = f.area();
 
     let now = chrono::Utc::now().timestamp();
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
     if band(area) == Band::TooSmall {
         let p = Paragraph::new("Resize terminal (need >= 70x18)")
@@ -127,6 +128,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let wts = data.worktrees.clone();
     let loc = data.loc.clone();
     let jobs = data.jobs.clone();
+    let usage = data.usage.clone();
     drop(data);
 
     for (kind, rect) in &placed {
@@ -161,6 +163,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
                         Some(Block::default().borders(Borders::ALL).inner(*rect));
                     app.rects.table_offset = offset;
                 }
+            }
+            WidgetKind::Cost => {
+                widgets::cost::render(f, *rect, usage.as_ref(), &theme, focused, b, &today);
             }
             other => {
                 let block = Block::default()
