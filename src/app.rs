@@ -41,6 +41,7 @@ pub enum Detail {
     Cost,
     CostModel(usize),
     Activity,
+    Code,
 }
 
 /// The current screen.

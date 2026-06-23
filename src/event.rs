@@ -307,6 +307,12 @@ fn apply(app: &mut App, action: Action, root: &str) {
                         app.detail_scroll = 0;
                     }
                 }
+                WidgetKind::Code => {
+                    if !app.data.lock().unwrap().loc.is_empty() {
+                        app.view = View::Detail(Detail::Code);
+                        app.detail_scroll = 0;
+                    }
+                }
                 _ => {}
             },
             View::Detail(Detail::Worktree) => open_file_diff(app),
