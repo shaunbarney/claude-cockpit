@@ -11,13 +11,7 @@ use crate::theme::Theme;
 use crate::util::human_duration;
 
 /// Render the Repo health widget into `area`.
-pub fn render(
-    f: &mut Frame,
-    area: Rect,
-    repo: Option<&RepoHealth>,
-    theme: &Theme,
-    focused: bool,
-) {
+pub fn render(f: &mut Frame, area: Rect, repo: Option<&RepoHealth>, theme: &Theme, focused: bool) {
     let border_style = if focused {
         Style::new().fg(theme.focus_border)
     } else {
@@ -119,7 +113,8 @@ mod tests {
         };
         let theme = Theme::default();
         let mut term = Terminal::new(TestBackend::new(80, 12)).unwrap();
-        term.draw(|f| render(f, f.area(), Some(&repo), &theme, false)).unwrap();
+        term.draw(|f| render(f, f.area(), Some(&repo), &theme, false))
+            .unwrap();
         let s = buffer_text(term.backend().buffer());
         assert!(s.contains("Repo"), "expected 'Repo' in output");
         assert!(s.contains("main"), "expected 'main' in output");

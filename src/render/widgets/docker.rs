@@ -95,8 +95,7 @@ pub fn render(
     let widths = if compact { compact_widths } else { full_widths };
 
     let header = if compact {
-        Row::new(["", "Name", "CPU%", "Mem"])
-            .style(Style::new().add_modifier(Modifier::BOLD))
+        Row::new(["", "Name", "CPU%", "Mem"]).style(Style::new().add_modifier(Modifier::BOLD))
     } else {
         Row::new(["", "Name", "Health", "CPU%", "Mem", "Ports"])
             .style(Style::new().add_modifier(Modifier::BOLD))
@@ -125,11 +124,20 @@ pub fn render(
             if compact {
                 Row::new(vec![dot_cell, name_cell, cpu_cell, mem_cell])
             } else {
-                let health_cell =
-                    Cell::from(Span::styled(health_text(c).to_string(), Style::new().fg(color)));
+                let health_cell = Cell::from(Span::styled(
+                    health_text(c).to_string(),
+                    Style::new().fg(color),
+                ));
                 let ports_str = truncate(&c.ports.join(", "), 30);
                 let ports_cell = Cell::from(Span::styled(ports_str, theme.dim_style()));
-                Row::new(vec![dot_cell, name_cell, health_cell, cpu_cell, mem_cell, ports_cell])
+                Row::new(vec![
+                    dot_cell,
+                    name_cell,
+                    health_cell,
+                    cpu_cell,
+                    mem_cell,
+                    ports_cell,
+                ])
             }
         })
         .collect();
@@ -177,7 +185,12 @@ mod tests {
         term.draw(|f| {
             render(
                 f,
-                Rect { x: 0, y: 0, width: 140, height: 12 },
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 140,
+                    height: 12,
+                },
                 &containers,
                 &theme,
                 true,
@@ -188,7 +201,10 @@ mod tests {
         .unwrap();
         let s = buffer_text(term.backend().buffer());
         assert!(s.contains("svc"), "expected 'svc' in buffer");
-        assert!(s.contains("Docker"), "expected 'Docker' block title in buffer");
+        assert!(
+            s.contains("Docker"),
+            "expected 'Docker' block title in buffer"
+        );
     }
 
     #[test]
@@ -199,7 +215,12 @@ mod tests {
         term.draw(|f| {
             render(
                 f,
-                Rect { x: 0, y: 0, width: 80, height: 10 },
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 80,
+                    height: 10,
+                },
                 &[],
                 &theme,
                 false,
@@ -210,6 +231,8 @@ mod tests {
         .unwrap();
         let s = buffer_text(term.backend().buffer());
         assert!(s.contains("Docker"), "expected 'Docker' block title");
-        assert!(s.to_lowercase().contains("no containers") || s.to_lowercase().contains("not running"));
+        assert!(
+            s.to_lowercase().contains("no containers") || s.to_lowercase().contains("not running")
+        );
     }
 }

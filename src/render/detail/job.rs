@@ -39,15 +39,12 @@ pub fn render(
     render_timeline(f, chunks[1], events, theme, scroll);
 }
 
-fn render_header(
-    f: &mut Frame,
-    area: ratatui::layout::Rect,
-    job: &Job,
-    theme: &Theme,
-    now: i64,
-) {
+fn render_header(f: &mut Frame, area: ratatui::layout::Rect, job: &Job, theme: &Theme, now: i64) {
     let title = format!(" Job · {} ", job.name);
-    let block = Block::default().borders(Borders::ALL).title(title).title_style(theme.title());
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .title_style(theme.title());
 
     let state_sp = Span::styled(job.state.clone(), state_style(&job.state, theme));
     let tempo_sp = Span::styled(job.tempo.clone(), theme.dim_style());
@@ -101,7 +98,10 @@ fn render_timeline(
 ) {
     let n = events.len();
     let title = format!(" Timeline ({n} events) ");
-    let block = Block::default().borders(Borders::ALL).title(title).title_style(theme.title());
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .title_style(theme.title());
 
     if events.is_empty() {
         let p = Paragraph::new(Line::from(Span::styled(
@@ -140,7 +140,9 @@ fn render_timeline(
         .collect();
 
     let inner = block.inner(area);
-    let p = Paragraph::new(Text::from(lines)).block(block).scroll((scroll, 0));
+    let p = Paragraph::new(Text::from(lines))
+        .block(block)
+        .scroll((scroll, 0));
     f.render_widget(p, area);
 
     // Scrollbar on the right side.
@@ -199,7 +201,12 @@ mod tests {
         term.draw(|f| {
             render(
                 f,
-                ratatui::layout::Rect { x: 0, y: 0, width: 120, height: 24 },
+                ratatui::layout::Rect {
+                    x: 0,
+                    y: 0,
+                    width: 120,
+                    height: 24,
+                },
                 &job,
                 &events,
                 &theme,
@@ -210,8 +217,17 @@ mod tests {
         .unwrap();
 
         let s = buffer_text(term.backend().buffer());
-        assert!(s.contains("GovernourCockpit"), "expected job name in buffer");
-        assert!(s.contains("starting build"), "expected first event detail in buffer");
-        assert!(s.contains("tests passing"), "expected second event detail in buffer");
+        assert!(
+            s.contains("GovernourCockpit"),
+            "expected job name in buffer"
+        );
+        assert!(
+            s.contains("starting build"),
+            "expected first event detail in buffer"
+        );
+        assert!(
+            s.contains("tests passing"),
+            "expected second event detail in buffer"
+        );
     }
 }

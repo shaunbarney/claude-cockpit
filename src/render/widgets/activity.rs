@@ -160,7 +160,12 @@ mod tests {
         term.draw(|f| {
             render(
                 f,
-                Rect { x: 0, y: 0, width: 120, height: 16 },
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 120,
+                    height: 16,
+                },
                 Some(&totals),
                 &cadence,
                 &Theme::default(),

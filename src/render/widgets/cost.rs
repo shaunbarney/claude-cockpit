@@ -32,13 +32,17 @@ pub fn render(
         .border_style(border_style);
 
     let Some(totals) = totals else {
-        let p = Paragraph::new(Line::from("no usage data")).block(block).style(theme.dim_style());
+        let p = Paragraph::new(Line::from("no usage data"))
+            .block(block)
+            .style(theme.dim_style());
         f.render_widget(p, area);
         return;
     };
 
     if totals.total_cost_usd == 0.0 && totals.by_day.is_empty() {
-        let p = Paragraph::new(Line::from("no usage data")).block(block).style(theme.dim_style());
+        let p = Paragraph::new(Line::from("no usage data"))
+            .block(block)
+            .style(theme.dim_style());
         f.render_widget(p, area);
         return;
     }
@@ -88,17 +92,17 @@ pub fn render(
     if compact {
         // Compact: header + model table stacked.
         let rows_count = (top_models.len() as u16).max(1);
-        let cuts = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Min(rows_count),
-        ])
-        .split(inner);
+        let cuts =
+            Layout::vertical([Constraint::Length(1), Constraint::Min(rows_count)]).split(inner);
 
         f.render_widget(Paragraph::new(header), cuts[0]);
         render_model_table(f, cuts[1], &top_models, theme);
     } else {
         // Wide/medium: header + chart + model table.
-        let chart_h = inner.height.saturating_sub(1 + top_models.len() as u16 + 1).max(3);
+        let chart_h = inner
+            .height
+            .saturating_sub(1 + top_models.len() as u16 + 1)
+            .max(3);
         let model_h = (top_models.len() as u16 + 1).max(2);
         let cuts = Layout::vertical([
             Constraint::Length(1),
@@ -156,12 +160,13 @@ fn render_model_table(f: &mut Frame, area: Rect, models: &[&ModelUsage], theme: 
 
     let table = Table::new(
         rows,
-        &[Constraint::Min(20), Constraint::Length(8), Constraint::Length(12)],
+        &[
+            Constraint::Min(20),
+            Constraint::Length(8),
+            Constraint::Length(12),
+        ],
     )
-    .header(
-        Row::new(["Model", "Cost", "Output"])
-            .style(theme.dim_style()),
-    )
+    .header(Row::new(["Model", "Cost", "Output"]).style(theme.dim_style()))
     .column_spacing(1);
 
     f.render_widget(table, area);
@@ -202,7 +207,12 @@ mod tests {
         term.draw(|f| {
             render(
                 f,
-                Rect { x: 0, y: 0, width: 120, height: 16 },
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 120,
+                    height: 16,
+                },
                 Some(&totals),
                 &Theme::default(),
                 false,

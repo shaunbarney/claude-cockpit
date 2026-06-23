@@ -25,7 +25,12 @@ fn draw_help(f: &mut Frame, area: Rect, theme: &Theme) {
     let y = area.y + area.height.saturating_sub(H) / 2;
     let w = W.min(area.width);
     let h = H.min(area.height);
-    let popup = Rect { x, y, width: w, height: h };
+    let popup = Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    };
 
     let text = concat!(
         "  Tab / ← →     focus widget\n",
@@ -54,8 +59,7 @@ fn draw_content(f: &mut Frame, app: &mut App) {
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
     if band(area) == Band::TooSmall {
-        let p = Paragraph::new("Resize terminal (need >= 70x18)")
-            .alignment(Alignment::Center);
+        let p = Paragraph::new("Resize terminal (need >= 70x18)").alignment(Alignment::Center);
         let v = Layout::vertical([
             Constraint::Fill(1),
             Constraint::Length(1),
@@ -69,10 +73,16 @@ fn draw_content(f: &mut Frame, app: &mut App) {
     }
 
     // Detail routing: classify the view without holding a borrow across mutable calls.
-    enum DetailRoute { Job(usize), Worktree, Diff, Container(usize), None }
+    enum DetailRoute {
+        Job(usize),
+        Worktree,
+        Diff,
+        Container(usize),
+        None,
+    }
     let route = match &app.view {
         View::Detail(Detail::Job(i)) => DetailRoute::Job(*i),
-        View::Detail(Detail::Worktree(_)) => DetailRoute::Worktree,
+        View::Detail(Detail::Worktree) => DetailRoute::Worktree,
         View::Detail(Detail::Diff(_)) => DetailRoute::Diff,
         View::Detail(Detail::Container(i)) => DetailRoute::Container(*i),
         _ => DetailRoute::None,
@@ -86,7 +96,13 @@ fn draw_content(f: &mut Frame, app: &mut App) {
                 Some(job) => {
                     let events = crate::collect::jobs::read_timeline(&job.id, 200);
                     crate::render::detail::job::render(
-                        f, outer[0], &job, &events, &app.theme, now, app.detail_scroll,
+                        f,
+                        outer[0],
+                        &job,
+                        &events,
+                        &app.theme,
+                        now,
+                        app.detail_scroll,
                     );
                 }
                 None => {
@@ -106,7 +122,13 @@ fn draw_content(f: &mut Frame, app: &mut App) {
             let jobs = { app.data.lock().unwrap().jobs.clone() };
             if let Some(detail) = app.wt_detail.clone() {
                 crate::render::detail::worktree::render(
-                    f, outer[0], &detail, &jobs, &theme, &mut app.detail_table, now,
+                    f,
+                    outer[0],
+                    &detail,
+                    &jobs,
+                    &theme,
+                    &mut app.detail_table,
+                    now,
                 );
             } else {
                 f.render_widget(
@@ -115,10 +137,8 @@ fn draw_content(f: &mut Frame, app: &mut App) {
                 );
             }
             f.render_widget(
-                Paragraph::new(Line::from(
-                    "  Esc back · ↑/↓ select · Enter diff · q quit",
-                ))
-                .style(theme.dim_style()),
+                Paragraph::new(Line::from("  Esc back · ↑/↓ select · Enter diff · q quit"))
+                    .style(theme.dim_style()),
                 outer[1],
             );
             app.rects = FrameRects::default();
@@ -165,8 +185,7 @@ fn draw_content(f: &mut Frame, app: &mut App) {
         DetailRoute::None => {}
     }
 
-    let outer =
-        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
+    let outer = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
     let body = outer[0];
     let b = band(body);
 
@@ -207,7 +226,8 @@ fn draw_content(f: &mut Frame, app: &mut App) {
                     st.table.offset()
                 };
                 if focused {
-                    app.rects.table_inner = Some(Block::default().borders(Borders::ALL).inner(*rect));
+                    app.rects.table_inner =
+                        Some(Block::default().borders(Borders::ALL).inner(*rect));
                     // Fix-7 note: table_offset reflects the PREVIOUS frame's offset (set here,
                     // before render_stateful_widget advances it), so a click in the same frame
                     // as a scroll resolves against last frame's offset and self-corrects next draw.
@@ -234,14 +254,20 @@ fn draw_content(f: &mut Frame, app: &mut App) {
                 widgets::cost::render(f, *rect, usage.as_ref(), &theme, focused, b, &today);
             }
             WidgetKind::Activity => {
-                widgets::activity::render(
-                    f, *rect, usage.as_ref(), &activity, &theme, focused, b,
-                );
+                widgets::activity::render(f, *rect, usage.as_ref(), &activity, &theme, focused, b);
             }
             WidgetKind::Docker => {
                 let offset = {
                     let st = app.ui.entry(WidgetKind::Docker).or_default();
-                    widgets::docker::render(f, *rect, &containers, &theme, focused, b, &mut st.table);
+                    widgets::docker::render(
+                        f,
+                        *rect,
+                        &containers,
+                        &theme,
+                        focused,
+                        b,
+                        &mut st.table,
+                    );
                     st.table.offset()
                 };
                 if focused {

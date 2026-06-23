@@ -14,6 +14,8 @@ pub struct Job {
     pub intent: String,
     pub tasks: u32,
     pub queued: u32,
+    // reserved: job working-directory display in the job detail header.
+    #[allow(dead_code)]
     pub cwd: String,
     pub worktree_path: Option<String>,
     pub worktree_branch: Option<String>,
@@ -24,6 +26,8 @@ pub struct Job {
 /// One timeline event.
 #[derive(Debug, Clone)]
 pub struct JobEvent {
+    // reserved: per-event timestamps in the job timeline view.
+    #[allow(dead_code)]
     pub at: i64,
     pub state: String,
     pub detail: String,
@@ -32,7 +36,9 @@ pub struct JobEvent {
 
 /// RFC3339 timestamp -> epoch seconds.
 pub fn iso_to_epoch(s: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(s).ok().map(|dt| dt.timestamp())
+    chrono::DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|dt| dt.timestamp())
 }
 
 /// Parse a job's `state.json`. Defensive: tolerates missing/optional fields.
@@ -42,10 +48,17 @@ pub fn parse_state(id: &str, json: &str) -> Option<Job> {
     let opt = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
     let inflight = v.get("inFlight");
     let num = |k: &str| {
-        inflight.and_then(|o| o.get(k)).and_then(|x| x.as_u64()).unwrap_or(0) as u32
+        inflight
+            .and_then(|o| o.get(k))
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0) as u32
     };
     let raw_name = s("name");
-    let name = if raw_name.is_empty() { id.to_string() } else { raw_name };
+    let name = if raw_name.is_empty() {
+        id.to_string()
+    } else {
+        raw_name
+    };
     Some(Job {
         id: id.to_string(),
         name,
@@ -57,8 +70,14 @@ pub fn parse_state(id: &str, json: &str) -> Option<Job> {
         cwd: s("cwd"),
         worktree_path: opt("worktreePath"),
         worktree_branch: opt("worktreeBranch"),
-        created_at: v.get("createdAt").and_then(|x| x.as_str()).and_then(iso_to_epoch),
-        updated_at: v.get("updatedAt").and_then(|x| x.as_str()).and_then(iso_to_epoch),
+        created_at: v
+            .get("createdAt")
+            .and_then(|x| x.as_str())
+            .and_then(iso_to_epoch),
+        updated_at: v
+            .get("updatedAt")
+            .and_then(|x| x.as_str())
+            .and_then(iso_to_epoch),
     })
 }
 
@@ -74,8 +93,12 @@ pub fn rank_job(j: &Job) -> (u8, i64) {
 
 /// Scan `~/.claude/jobs/*/state.json` into ranked jobs (empty on any IO failure).
 pub fn gather_jobs() -> Vec<Job> {
-    let Some(home) = claude_home() else { return vec![] };
-    let Ok(entries) = std::fs::read_dir(home.join("jobs")) else { return vec![] };
+    let Some(home) = claude_home() else {
+        return vec![];
+    };
+    let Ok(entries) = std::fs::read_dir(home.join("jobs")) else {
+        return vec![];
+    };
     let mut out = Vec::new();
     for e in entries.flatten() {
         if !e.path().is_dir() {
@@ -99,9 +122,21 @@ pub fn parse_timeline(s: &str) -> Vec<JobEvent> {
             let v: Value = serde_json::from_str(line).ok()?;
             Some(JobEvent {
                 at: v.get("at").and_then(|x| x.as_i64()).unwrap_or(0),
-                state: v.get("state").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                detail: v.get("detail").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-                text: v.get("text").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                state: v
+                    .get("state")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                detail: v
+                    .get("detail")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                text: v
+                    .get("text")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string(),
             })
         })
         .collect()
@@ -109,9 +144,13 @@ pub fn parse_timeline(s: &str) -> Vec<JobEvent> {
 
 /// Read the last `tail` events of a job's timeline (empty on IO failure).
 pub fn read_timeline(job_id: &str, tail: usize) -> Vec<JobEvent> {
-    let Some(home) = claude_home() else { return vec![] };
+    let Some(home) = claude_home() else {
+        return vec![];
+    };
     let p = home.join("jobs").join(job_id).join("timeline.jsonl");
-    let Ok(txt) = std::fs::read_to_string(p) else { return vec![] };
+    let Ok(txt) = std::fs::read_to_string(p) else {
+        return vec![];
+    };
     let all = parse_timeline(&txt);
     if all.len() > tail {
         all[all.len() - tail..].to_vec()
@@ -151,16 +190,28 @@ mod tests {
 
     fn mk(state: &str, tempo: &str, updated: i64) -> Job {
         Job {
-            id: "x".into(), name: "x".into(), state: state.into(), tempo: tempo.into(),
-            intent: String::new(), tasks: 0, queued: 0, cwd: String::new(),
-            worktree_path: None, worktree_branch: None,
-            created_at: None, updated_at: Some(updated),
+            id: "x".into(),
+            name: "x".into(),
+            state: state.into(),
+            tempo: tempo.into(),
+            intent: String::new(),
+            tasks: 0,
+            queued: 0,
+            cwd: String::new(),
+            worktree_path: None,
+            worktree_branch: None,
+            created_at: None,
+            updated_at: Some(updated),
         }
     }
 
     #[test]
     fn ranks_active_first() {
-        let mut v = vec![mk("done", "idle", 100), mk("working", "active", 50), mk("blocked", "blocked", 80)];
+        let mut v = [
+            mk("done", "idle", 100),
+            mk("working", "active", 50),
+            mk("blocked", "blocked", 80),
+        ];
         v.sort_by_key(rank_job);
         assert_eq!(v[0].state, "working");
         assert_eq!(v[1].state, "blocked");

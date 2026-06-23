@@ -8,7 +8,9 @@ pub struct EndpointSpec {
     pub host: String,
     pub port: u16,
 }
-fn default_host() -> String { "127.0.0.1".to_string() }
+fn default_host() -> String {
+    "127.0.0.1".to_string()
+}
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 pub struct Config {
@@ -48,7 +50,8 @@ mod tests {
     use super::*;
     #[test]
     fn parses_endpoints() {
-        let cfg = parse(r#"
+        let cfg = parse(
+            r#"
             [[endpoints]]
             label = "frontend"
             port = 3000
@@ -56,7 +59,8 @@ mod tests {
             label = "backend"
             host = "localhost"
             port = 8080
-        "#);
+        "#,
+        );
         assert_eq!(cfg.endpoints.len(), 2);
         assert_eq!(cfg.endpoints[0].label, "frontend");
         assert_eq!(cfg.endpoints[0].host, "127.0.0.1"); // default

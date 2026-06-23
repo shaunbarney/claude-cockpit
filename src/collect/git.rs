@@ -81,15 +81,25 @@ pub fn gather_worktrees(root: &str) -> Vec<Worktree> {
             .parse()
             .unwrap_or(0);
         let dirty = git(&["-C", &path, "status", "--porcelain"]).lines().count() as u32;
-        let committed =
-            parse_shortstat(&git(&["-C", &path, "diff", "--shortstat", "main...HEAD"]));
+        let committed = parse_shortstat(&git(&["-C", &path, "diff", "--shortstat", "main...HEAD"]));
         let uncommitted = parse_shortstat(&git(&["-C", &path, "diff", "--shortstat", "HEAD"]));
-        let age = git(&["-C", &path, "log", "-1", "--format=%cr"]).trim().to_string();
+        let age = git(&["-C", &path, "log", "-1", "--format=%cr"])
+            .trim()
+            .to_string();
         let name = std::path::Path::new(&path)
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.clone());
-        rows.push(Worktree { name, path: path.clone(), branch: b, ahead, dirty, committed, uncommitted, age });
+        rows.push(Worktree {
+            name,
+            path: path.clone(),
+            branch: b,
+            ahead,
+            dirty,
+            committed,
+            uncommitted,
+            age,
+        });
     }
 
     rows.sort_by_key(rank);
@@ -118,24 +128,46 @@ pub fn parse_ahead_behind(s: &str) -> (u32, u32) {
 fn fetch_head_age(root: &str) -> Option<u64> {
     let rel = git(&["-C", root, "rev-parse", "--git-path", "FETCH_HEAD"]);
     let rel = rel.trim();
-    if rel.is_empty() { return None; }
+    if rel.is_empty() {
+        return None;
+    }
     let path = if std::path::Path::new(rel).is_absolute() {
         std::path::PathBuf::from(rel)
     } else {
         std::path::Path::new(root).join(rel)
     };
-    std::fs::metadata(path).ok()?.modified().ok()?.elapsed().ok().map(|d| d.as_secs())
+    std::fs::metadata(path)
+        .ok()?
+        .modified()
+        .ok()?
+        .elapsed()
+        .ok()
+        .map(|d| d.as_secs())
 }
 
 /// Whole-repo git health vs origin/main (best-effort; zeros on failure).
 pub fn repo_health(root: &str) -> RepoHealth {
-    let branch = git(&["-C", root, "rev-parse", "--abbrev-ref", "HEAD"]).trim().to_string();
-    let (ahead, behind) = parse_ahead_behind(
-        &git(&["-C", root, "rev-list", "--left-right", "--count", "HEAD...origin/main"]),
-    );
+    let branch = git(&["-C", root, "rev-parse", "--abbrev-ref", "HEAD"])
+        .trim()
+        .to_string();
+    let (ahead, behind) = parse_ahead_behind(&git(&[
+        "-C",
+        root,
+        "rev-list",
+        "--left-right",
+        "--count",
+        "HEAD...origin/main",
+    ]));
     let stash = git(&["-C", root, "stash", "list"]).lines().count() as u32;
     let dirty = git(&["-C", root, "status", "--porcelain"]).lines().count() as u32;
-    RepoHealth { branch, ahead, behind, stash, dirty, last_fetch_secs: fetch_head_age(root) }
+    RepoHealth {
+        branch,
+        ahead,
+        behind,
+        stash,
+        dirty,
+        last_fetch_secs: fetch_head_age(root),
+    }
 }
 
 /// Sort key matching the Python `rank()`: (bucket, tiebreak).
@@ -189,7 +221,7 @@ mod tests {
 
     #[test]
     fn ranks_ahead_then_dirty_then_clean() {
-        let mut v = vec![wt(0, 0), wt(0, 3), wt(2, 0), wt(5, 0)];
+        let mut v = [wt(0, 0), wt(0, 3), wt(2, 0), wt(5, 0)];
         v.sort_by_key(rank);
         let order: Vec<(u32, u32)> = v.iter().map(|w| (w.ahead, w.dirty)).collect();
         assert_eq!(order, vec![(5, 0), (2, 0), (0, 3), (0, 0)]);

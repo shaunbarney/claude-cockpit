@@ -138,7 +138,12 @@ mod tests {
         term.draw(|f| {
             render(
                 f,
-                Rect { x: 0, y: 0, width: 120, height: 10 },
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 120,
+                    height: 10,
+                },
                 &endpoints,
                 &theme,
                 true,
@@ -149,6 +154,9 @@ mod tests {
         .unwrap();
         let s = buffer_text(term.backend().buffer());
         assert!(s.contains("api"), "expected 'api' in buffer");
-        assert!(s.contains("Ports"), "expected 'Ports' block title in buffer");
+        assert!(
+            s.contains("Ports"),
+            "expected 'Ports' block title in buffer"
+        );
     }
 }

@@ -17,16 +17,30 @@ use ratatui::widgets::{Block, Borders};
 
 use crate::app::{App, Detail, DiffView, View};
 use crate::collect::git_detail::{self, DiffMode};
+use crate::refresh;
 use crate::theme::Theme;
 use crate::widget::WidgetKind;
-use crate::refresh;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Action { Quit, Refresh, FocusNext, FocusPrev, Up, Down, Expand, Drill, Back, Help, None }
+pub enum Action {
+    Quit,
+    Refresh,
+    FocusNext,
+    FocusPrev,
+    Up,
+    Down,
+    Expand,
+    Drill,
+    Back,
+    Help,
+    None,
+}
 
 /// Pure key -> action map.
 pub fn map_key(code: KeyCode, mods: KeyModifiers) -> Action {
-    if code == KeyCode::Char('c') && mods.contains(KeyModifiers::CONTROL) { return Action::Quit; }
+    if code == KeyCode::Char('c') && mods.contains(KeyModifiers::CONTROL) {
+        return Action::Quit;
+    }
     match code {
         KeyCode::Char('q') => Action::Quit,
         KeyCode::Esc => Action::Back,
@@ -45,7 +59,9 @@ pub fn map_key(code: KeyCode, mods: KeyModifiers) -> Action {
 /// Pure: which table row does a click at terminal row `y` hit, given the table's
 /// inner rect (header at inner.y, data rows from inner.y+1) and current scroll offset.
 pub fn row_at(inner: Rect, offset: usize, y: u16) -> Option<usize> {
-    if y <= inner.y { return None; }
+    if y <= inner.y {
+        return None;
+    }
     Some(offset + (y - inner.y - 1) as usize)
 }
 
@@ -73,10 +89,16 @@ fn is_table_widget(kind: WidgetKind) -> bool {
 
 fn move_selection(app: &mut App, down: bool) {
     let n = row_count(app, app.focus);
-    if n == 0 { return; }
+    if n == 0 {
+        return;
+    }
     let st = app.focus_ui_mut();
     let cur = st.table.selected().unwrap_or(0);
-    let next = if down { (cur + 1).min(n - 1) } else { cur.saturating_sub(1) };
+    let next = if down {
+        (cur + 1).min(n - 1)
+    } else {
+        cur.saturating_sub(1)
+    };
     st.table.select(Some(next));
 }
 
@@ -84,7 +106,14 @@ fn move_selection(app: &mut App, down: bool) {
 fn combined_files(d: &git_detail::WorktreeDetail) -> Vec<(String, DiffMode)> {
     let mut v: Vec<(String, DiffMode)> = Vec::new();
     for f in &d.uncommitted_files {
-        v.push((f.path.clone(), if f.staged { DiffMode::Staged } else { DiffMode::Unstaged }));
+        v.push((
+            f.path.clone(),
+            if f.staged {
+                DiffMode::Staged
+            } else {
+                DiffMode::Unstaged
+            },
+        ));
     }
     for f in &d.committed_files {
         v.push((f.path.clone(), DiffMode::Committed));
@@ -100,7 +129,11 @@ fn wt_file_count(app: &App) -> usize {
 }
 
 fn open_worktree_detail(app: &mut App) {
-    let Some(idx) = app.ui.get(&WidgetKind::Worktrees).and_then(|u| u.table.selected()) else {
+    let Some(idx) = app
+        .ui
+        .get(&WidgetKind::Worktrees)
+        .and_then(|u| u.table.selected())
+    else {
         return;
     };
     let wt = app.data.lock().unwrap().worktrees.get(idx).cloned();
@@ -110,11 +143,15 @@ fn open_worktree_detail(app: &mut App) {
     app.last_wt_idx = Some(idx);
     app.detail_table = ratatui::widgets::TableState::default();
     app.detail_table.select(Some(0));
-    app.view = View::Detail(Detail::Worktree(idx));
+    app.view = View::Detail(Detail::Worktree);
 }
 
 fn open_container_detail(app: &mut App) {
-    let Some(idx) = app.ui.get(&WidgetKind::Docker).and_then(|u| u.table.selected()) else {
+    let Some(idx) = app
+        .ui
+        .get(&WidgetKind::Docker)
+        .and_then(|u| u.table.selected())
+    else {
         return;
     };
     let c = app.data.lock().unwrap().containers.get(idx).cloned();
@@ -125,10 +162,16 @@ fn open_container_detail(app: &mut App) {
 }
 
 fn open_file_diff(app: &mut App) {
-    let Some(detail) = app.wt_detail.clone() else { return };
-    let Some(sel) = app.detail_table.selected() else { return };
+    let Some(detail) = app.wt_detail.clone() else {
+        return;
+    };
+    let Some(sel) = app.detail_table.selected() else {
+        return;
+    };
     let files = combined_files(&detail);
-    let Some((path, mode)) = files.get(sel) else { return };
+    let Some((path, mode)) = files.get(sel) else {
+        return;
+    };
     let lines = git_detail::file_diff(&detail.path, path, *mode);
     let label = match mode {
         DiffMode::Staged => "staged",
@@ -138,7 +181,6 @@ fn open_file_diff(app: &mut App) {
     app.view = View::Detail(Detail::Diff(DiffView {
         title: format!("{} · {}", path, label),
         lines,
-        scroll: 0,
     }));
     app.detail_scroll = 0;
 }
@@ -162,7 +204,7 @@ fn apply(app: &mut App, action: Action, root: &str) {
         Action::FocusNext => app.focus_next(),
         Action::FocusPrev => app.focus_prev(),
         Action::Up => match &app.view {
-            View::Detail(Detail::Worktree(_)) => {
+            View::Detail(Detail::Worktree) => {
                 let s = app.detail_table.selected().unwrap_or(0);
                 app.detail_table.select(Some(s.saturating_sub(1)));
             }
@@ -172,7 +214,7 @@ fn apply(app: &mut App, action: Action, root: &str) {
             _ => move_selection(app, false),
         },
         Action::Down => match &app.view {
-            View::Detail(Detail::Worktree(_)) => {
+            View::Detail(Detail::Worktree) => {
                 let n = wt_file_count(app);
                 if n > 0 {
                     let s = app.detail_table.selected().unwrap_or(0);
@@ -197,8 +239,10 @@ fn apply(app: &mut App, action: Action, root: &str) {
             View::Dashboard | View::Expanded(_) => match app.focus {
                 WidgetKind::Worktrees => open_worktree_detail(app),
                 WidgetKind::Jobs => {
-                    if let Some(idx) =
-                        app.ui.get(&WidgetKind::Jobs).and_then(|u| u.table.selected())
+                    if let Some(idx) = app
+                        .ui
+                        .get(&WidgetKind::Jobs)
+                        .and_then(|u| u.table.selected())
                     {
                         let n = app.data.lock().unwrap().jobs.len();
                         if idx < n {
@@ -210,7 +254,7 @@ fn apply(app: &mut App, action: Action, root: &str) {
                 WidgetKind::Docker => open_container_detail(app),
                 _ => {}
             },
-            View::Detail(Detail::Worktree(_)) => open_file_diff(app),
+            View::Detail(Detail::Worktree) => open_file_diff(app),
             _ => {}
         },
         Action::None => {}
@@ -218,13 +262,18 @@ fn apply(app: &mut App, action: Action, root: &str) {
 }
 
 fn handle_mouse(app: &mut App, m: MouseEvent, root: &str) {
-    let pos = Position { x: m.column, y: m.row };
+    let pos = Position {
+        x: m.column,
+        y: m.row,
+    };
     match m.kind {
         MouseEventKind::Down(MouseButton::Left) => {
             if let Some(kind) = app.rects.widget_at(pos) {
                 app.focus = kind;
                 if is_table_widget(kind) {
-                    if let Some((_, outer)) = app.rects.widgets.iter().find(|(k, _)| *k == kind).copied() {
+                    if let Some((_, outer)) =
+                        app.rects.widgets.iter().find(|(k, _)| *k == kind).copied()
+                    {
                         let inner = Block::default().borders(Borders::ALL).inner(outer);
                         if inner.contains(pos) {
                             let offset = app.ui_offset(kind);
@@ -261,11 +310,15 @@ pub fn run(root: &str) -> io::Result<()> {
 }
 
 fn event_loop<B: ratatui::backend::Backend>(
-    term: &mut ratatui::Terminal<B>, app: &mut App, root: &str,
+    term: &mut ratatui::Terminal<B>,
+    app: &mut App,
+    root: &str,
 ) -> io::Result<()> {
     loop {
         term.draw(|f| crate::render::dashboard::render(f, app))?;
-        if app.should_quit { break; }
+        if app.should_quit {
+            break;
+        }
         if event::poll(Duration::from_millis(250))? {
             match event::read()? {
                 Event::Key(k) if k.kind == KeyEventKind::Press => {
@@ -283,17 +336,39 @@ fn event_loop<B: ratatui::backend::Backend>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn maps_keys() {
-        assert!(matches!(map_key(KeyCode::Char('q'), KeyModifiers::NONE), Action::Quit));
-        assert!(matches!(map_key(KeyCode::Char('e'), KeyModifiers::NONE), Action::Expand));
-        assert!(matches!(map_key(KeyCode::Tab, KeyModifiers::NONE), Action::FocusNext));
-        assert!(matches!(map_key(KeyCode::Char('c'), KeyModifiers::CONTROL), Action::Quit));
-        assert!(matches!(map_key(KeyCode::Enter, KeyModifiers::NONE), Action::Drill));
+    #[test]
+    fn maps_keys() {
+        assert!(matches!(
+            map_key(KeyCode::Char('q'), KeyModifiers::NONE),
+            Action::Quit
+        ));
+        assert!(matches!(
+            map_key(KeyCode::Char('e'), KeyModifiers::NONE),
+            Action::Expand
+        ));
+        assert!(matches!(
+            map_key(KeyCode::Tab, KeyModifiers::NONE),
+            Action::FocusNext
+        ));
+        assert!(matches!(
+            map_key(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            Action::Quit
+        ));
+        assert!(matches!(
+            map_key(KeyCode::Enter, KeyModifiers::NONE),
+            Action::Drill
+        ));
     }
-    #[test] fn row_at_maps_clicks() {
-        let inner = Rect { x: 0, y: 5, width: 20, height: 10 };
-        assert_eq!(row_at(inner, 0, 5), None);       // header row
-        assert_eq!(row_at(inner, 0, 6), Some(0));    // first data row
-        assert_eq!(row_at(inner, 3, 7), Some(4));    // offset 3 + 2nd visible row
+    #[test]
+    fn row_at_maps_clicks() {
+        let inner = Rect {
+            x: 0,
+            y: 5,
+            width: 20,
+            height: 10,
+        };
+        assert_eq!(row_at(inner, 0, 5), None); // header row
+        assert_eq!(row_at(inner, 0, 6), Some(0)); // first data row
+        assert_eq!(row_at(inner, 3, 7), Some(4)); // offset 3 + 2nd visible row
     }
 }

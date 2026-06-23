@@ -49,19 +49,19 @@ pub fn render(
     let compact = band == Band::Compact;
 
     let full_widths: &[Constraint] = &[
-        Constraint::Length(2),  // dot
-        Constraint::Min(16),    // name
-        Constraint::Length(9),  // state
-        Constraint::Length(8),  // tasks
-        Constraint::Min(20),    // intent
-        Constraint::Length(9),  // age
+        Constraint::Length(2), // dot
+        Constraint::Min(16),   // name
+        Constraint::Length(9), // state
+        Constraint::Length(8), // tasks
+        Constraint::Min(20),   // intent
+        Constraint::Length(9), // age
     ];
     let compact_widths: &[Constraint] = &[
-        Constraint::Length(2),  // dot
-        Constraint::Min(14),    // name
-        Constraint::Length(9),  // state
-        Constraint::Min(16),    // intent (truncated)
-        Constraint::Length(9),  // age
+        Constraint::Length(2), // dot
+        Constraint::Min(14),   // name
+        Constraint::Length(9), // state
+        Constraint::Min(16),   // intent (truncated)
+        Constraint::Length(9), // age
     ];
 
     let widths = if compact { compact_widths } else { full_widths };
@@ -89,8 +89,8 @@ pub fn render(
             };
 
             // Stuck row: blocked for more than 5 minutes.
-            let stuck = j.state == "blocked"
-                && j.updated_at.map(|u| now - u > 300).unwrap_or(false);
+            let stuck =
+                j.state == "blocked" && j.updated_at.map(|u| now - u > 300).unwrap_or(false);
 
             let row_style = if stuck {
                 Style::new().fg(theme.warn)
@@ -98,12 +98,12 @@ pub fn render(
                 Style::new()
             };
 
-            let dot_cell =
-                Cell::from(Span::styled("●", Style::new().fg(dot_color)));
-            let name_cell =
-                Cell::from(Span::styled(j.name.clone(), Style::new().add_modifier(Modifier::BOLD)));
-            let state_cell =
-                Cell::from(Span::styled(j.state.clone(), Style::new().fg(dot_color)));
+            let dot_cell = Cell::from(Span::styled("●", Style::new().fg(dot_color)));
+            let name_cell = Cell::from(Span::styled(
+                j.name.clone(),
+                Style::new().add_modifier(Modifier::BOLD),
+            ));
+            let state_cell = Cell::from(Span::styled(j.state.clone(), Style::new().fg(dot_color)));
 
             // Tasks: "N" or "N+Q" dim when zero.
             let tasks_text = if j.queued > 0 {
@@ -140,7 +140,14 @@ pub fn render(
             let cells: Vec<Cell> = if compact {
                 vec![dot_cell, name_cell, state_cell, intent_cell, age_cell]
             } else {
-                vec![dot_cell, name_cell, state_cell, tasks_cell, intent_cell, age_cell]
+                vec![
+                    dot_cell,
+                    name_cell,
+                    state_cell,
+                    tasks_cell,
+                    intent_cell,
+                    age_cell,
+                ]
             };
 
             Row::new(cells).style(row_style)
@@ -193,7 +200,12 @@ mod tests {
         term.draw(|f| {
             render(
                 f,
-                Rect { x: 0, y: 0, width: 120, height: 12 },
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 120,
+                    height: 12,
+                },
                 &jobs,
                 &theme,
                 true,

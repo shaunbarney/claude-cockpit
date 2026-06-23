@@ -7,7 +7,11 @@ pub mod widgets;
 use comfy_table::Color;
 
 /// Accent violet, used for table titles and the LOC total.
-pub const VIOLET: Color = Color::Rgb { r: 0x7C, g: 0x5C, b: 0xFF };
+pub const VIOLET: Color = Color::Rgb {
+    r: 0x7C,
+    g: 0x5C,
+    b: 0xFF,
+};
 
 /// Join two pre-rendered multi-line blocks horizontally with `gap` spaces
 /// between them. Shorter block is padded with blank lines; each left line is
@@ -38,8 +42,8 @@ pub fn join_side_by_side(left: &str, right: &str, gap: usize) -> String {
 }
 
 use comfy_table::{
-    Attribute, Cell, CellAlignment, ContentArrangement, Table,
-    modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL,
+    modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Attribute, Cell, CellAlignment,
+    ContentArrangement, Table,
 };
 
 use crate::collect::git::Worktree;
@@ -66,21 +70,41 @@ pub fn worktree_table(rows: &[Worktree]) -> Table {
     t.set_header(vec![
         Cell::new(""),
         Cell::new("Worktree").add_attribute(Attribute::Bold),
-        Cell::new("Ahead").add_attribute(Attribute::Bold).set_alignment(CellAlignment::Right),
-        Cell::new("Dirty").add_attribute(Attribute::Bold).set_alignment(CellAlignment::Right),
-        Cell::new("Committed").add_attribute(Attribute::Bold).set_alignment(CellAlignment::Right),
-        Cell::new("Uncommitted").add_attribute(Attribute::Bold).set_alignment(CellAlignment::Right),
-        Cell::new("Age").add_attribute(Attribute::Bold).set_alignment(CellAlignment::Right),
+        Cell::new("Ahead")
+            .add_attribute(Attribute::Bold)
+            .set_alignment(CellAlignment::Right),
+        Cell::new("Dirty")
+            .add_attribute(Attribute::Bold)
+            .set_alignment(CellAlignment::Right),
+        Cell::new("Committed")
+            .add_attribute(Attribute::Bold)
+            .set_alignment(CellAlignment::Right),
+        Cell::new("Uncommitted")
+            .add_attribute(Attribute::Bold)
+            .set_alignment(CellAlignment::Right),
+        Cell::new("Age")
+            .add_attribute(Attribute::Bold)
+            .set_alignment(CellAlignment::Right),
     ]);
 
     for r in rows {
         let (dot, ahead_cell) = if r.ahead > 0 {
-            (Cell::new("●").fg(Color::Red),
-             Cell::new(r.ahead).fg(Color::Red).add_attribute(Attribute::Bold))
+            (
+                Cell::new("●").fg(Color::Red),
+                Cell::new(r.ahead)
+                    .fg(Color::Red)
+                    .add_attribute(Attribute::Bold),
+            )
         } else if r.dirty > 0 {
-            (Cell::new("●").fg(Color::Yellow), Cell::new("0").fg(Color::DarkGrey))
+            (
+                Cell::new("●").fg(Color::Yellow),
+                Cell::new("0").fg(Color::DarkGrey),
+            )
         } else {
-            (Cell::new("●").fg(Color::Green), Cell::new("0").fg(Color::DarkGrey))
+            (
+                Cell::new("●").fg(Color::Green),
+                Cell::new("0").fg(Color::DarkGrey),
+            )
         };
         let dirty_cell = if r.dirty > 0 {
             Cell::new(r.dirty).fg(Color::Yellow)
@@ -94,14 +118,16 @@ pub fn worktree_table(rows: &[Worktree]) -> Table {
             dirty_cell.set_alignment(CellAlignment::Right),
             churn_cell(r.committed, r.ahead > 0).set_alignment(CellAlignment::Right),
             churn_cell(r.uncommitted, r.dirty > 0).set_alignment(CellAlignment::Right),
-            Cell::new(&r.age).fg(Color::DarkGrey).set_alignment(CellAlignment::Right),
+            Cell::new(&r.age)
+                .fg(Color::DarkGrey)
+                .set_alignment(CellAlignment::Right),
         ]);
     }
     t
 }
 
-use console::style;
 use crate::collect::loc::{loc_rows, loc_table};
+use console::style;
 
 /// Which layout to render.
 #[derive(Clone, Copy)]
@@ -117,9 +143,21 @@ pub fn summary_line(rows: &[Worktree], note: &str) -> String {
     let dirty = rows.iter().filter(|r| r.ahead == 0 && r.dirty > 0).count();
     let clean = rows.len() - unmerged - dirty;
     let mut s = format!("  {}", style(format!("{} worktrees", rows.len())).bold());
-    s.push_str(&format!("   {} {}", style("●").red(), style(format!("{unmerged} unmerged")).red()));
-    s.push_str(&format!("   {} {}", style("●").yellow(), style(format!("{dirty} dirty")).yellow()));
-    s.push_str(&format!("   {} {}", style("●").green(), style(format!("{clean} clean")).green()));
+    s.push_str(&format!(
+        "   {} {}",
+        style("●").red(),
+        style(format!("{unmerged} unmerged")).red()
+    ));
+    s.push_str(&format!(
+        "   {} {}",
+        style("●").yellow(),
+        style(format!("{dirty} dirty")).yellow()
+    ));
+    s.push_str(&format!(
+        "   {} {}",
+        style("●").green(),
+        style(format!("{clean} clean")).green()
+    ));
     if !note.is_empty() {
         s.push_str(&format!("      {}", style(note).dim()));
     }
@@ -140,11 +178,17 @@ pub fn build_frame(root: &str, mode: Mode, note: &str) -> String {
     let body = match mode {
         Mode::Worktrees => wt,
         Mode::Code => {
-            let loc = titled("Repo Code · git-tracked", &loc_table(&loc_rows(root)).to_string());
+            let loc = titled(
+                "Repo Code · git-tracked",
+                &loc_table(&loc_rows(root)).to_string(),
+            );
             format!("{wt}\n\n{loc}")
         }
         Mode::Side => {
-            let loc = titled("Repo Code · git-tracked", &loc_table(&loc_rows(root)).to_string());
+            let loc = titled(
+                "Repo Code · git-tracked",
+                &loc_table(&loc_rows(root)).to_string(),
+            );
             join_side_by_side(&wt, &loc, 4)
         }
     };
@@ -205,8 +249,14 @@ mod tests {
     fn summary_counts_unmerged_dirty_clean() {
         use crate::collect::git::Worktree;
         let mk = |ahead: u32, dirty: u32| Worktree {
-            name: "x".into(), path: String::new(), branch: String::new(), ahead, dirty,
-            committed: (0, 0), uncommitted: (0, 0), age: String::new(),
+            name: "x".into(),
+            path: String::new(),
+            branch: String::new(),
+            ahead,
+            dirty,
+            committed: (0, 0),
+            uncommitted: (0, 0),
+            age: String::new(),
         };
         let rows = vec![mk(3, 0), mk(0, 2), mk(0, 0), mk(0, 0)];
         let line = summary_line(&rows, "");

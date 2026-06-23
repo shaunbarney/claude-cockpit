@@ -49,12 +49,18 @@ pub fn parse_session(jsonl: &str, day_fallback: &str) -> Vec<UsageRecord> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut out = Vec::new();
     for line in jsonl.lines() {
-        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
         if v.get("type").and_then(|x| x.as_str()) != Some("assistant") {
             continue;
         }
-        let Some(msg) = v.get("message") else { continue };
-        let Some(usage) = msg.get("usage") else { continue };
+        let Some(msg) = v.get("message") else {
+            continue;
+        };
+        let Some(usage) = msg.get("usage") else {
+            continue;
+        };
         let id = msg.get("id").and_then(|x| x.as_str()).unwrap_or("");
         if id.is_empty() || !seen.insert(id.to_string()) {
             continue; // dedupe by message.id
@@ -113,15 +119,26 @@ pub fn totalize(records: &[UsageRecord], prices: &PriceTable) -> UsageTotals {
     }
     totals.by_day = day
         .into_iter()
-        .map(|(day, (cost_usd, tokens))| DayUsage { day, cost_usd, tokens })
+        .map(|(day, (cost_usd, tokens))| DayUsage {
+            day,
+            cost_usd,
+            tokens,
+        })
         .collect();
     totals.by_day.sort_by(|a, b| a.day.cmp(&b.day));
     totals.by_model = model
         .into_iter()
-        .map(|(model, (cost_usd, input, output))| ModelUsage { model, cost_usd, input, output })
+        .map(|(model, (cost_usd, input, output))| ModelUsage {
+            model,
+            cost_usd,
+            input,
+            output,
+        })
         .collect();
     totals.by_model.sort_by(|a, b| {
-        b.cost_usd.partial_cmp(&a.cost_usd).unwrap_or(std::cmp::Ordering::Equal)
+        b.cost_usd
+            .partial_cmp(&a.cost_usd)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
     totals
 }
@@ -135,7 +152,9 @@ pub type UsageCache = HashMap<PathBuf, (SystemTime, u64, Vec<UsageRecord>)>;
 
 /// Recursively collect `*.jsonl` files under `dir`.
 fn collect_jsonl(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in entries.flatten() {
         let p = e.path();
         if p.is_dir() {
@@ -150,7 +169,9 @@ fn collect_jsonl(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
 /// files (keyed by mtime+len), and return aggregated totals.
 pub fn scan_all(cache: &mut UsageCache) -> UsageTotals {
     let prices = crate::collect::pricing::load();
-    let Some(home) = crate::util::claude_home() else { return UsageTotals::default() };
+    let Some(home) = crate::util::claude_home() else {
+        return UsageTotals::default();
+    };
     let mut files = Vec::new();
     collect_jsonl(&home.join("projects"), &mut files);
     let mut all: Vec<UsageRecord> = Vec::new();
@@ -188,7 +209,7 @@ mod tests {
 
     #[test]
     fn dedups_by_message_id_then_sums() {
-        let lines = vec![
+        let lines = [
             asst("m1", "claude-opus-4-8", 100, 10, 0, 0),
             asst("m1", "claude-opus-4-8", 100, 10, 0, 0), // streaming dupe
             asst("m2", "claude-opus-4-8", 200, 20, 0, 0),
@@ -213,7 +234,12 @@ mod tests {
         let mut map = HashMap::new();
         map.insert(
             "claude-x".to_string(),
-            ModelPrice { input: 1e-6, output: 5e-6, cache_write: 0.0, cache_read: 0.0 },
+            ModelPrice {
+                input: 1e-6,
+                output: 5e-6,
+                cache_write: 0.0,
+                cache_read: 0.0,
+            },
         );
         let totals = totalize(&recs, &PriceTable(map));
         assert!((totals.total_cost_usd - (1000.0 * 1e-6 + 100.0 * 5e-6)).abs() < 1e-12);

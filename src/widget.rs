@@ -2,13 +2,23 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WidgetKind {
-    Worktrees, Jobs, Cost, Activity, Code, Docker, Ports, Procs, Repo,
+    Worktrees,
+    Jobs,
+    Cost,
+    Activity,
+    Code,
+    Docker,
+    Ports,
+    Procs,
+    Repo,
 }
 
 impl WidgetKind {
     pub fn all() -> &'static [WidgetKind] {
         use WidgetKind::*;
-        &[Worktrees, Jobs, Cost, Activity, Code, Docker, Ports, Procs, Repo]
+        &[
+            Worktrees, Jobs, Cost, Activity, Code, Docker, Ports, Procs, Repo,
+        ]
     }
     #[allow(dead_code)]
     pub fn title(self) -> &'static str {
@@ -39,12 +49,18 @@ impl WidgetKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn focus_cycles_all() {
+    #[test]
+    fn focus_cycles_all() {
         let all = WidgetKind::all();
         assert_eq!(all.first().copied(), Some(WidgetKind::Worktrees));
         let mut k = WidgetKind::Worktrees;
-        for _ in 0..all.len() { k = k.next(); }
+        for _ in 0..all.len() {
+            k = k.next();
+        }
         assert_eq!(k, WidgetKind::Worktrees);
     }
-    #[test] fn titles_present() { assert_eq!(WidgetKind::Cost.title(), "Cost"); }
+    #[test]
+    fn titles_present() {
+        assert_eq!(WidgetKind::Cost.title(), "Cost");
+    }
 }

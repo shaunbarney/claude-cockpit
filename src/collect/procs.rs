@@ -14,8 +14,8 @@ pub struct Proc {
 }
 
 const DEFAULT_NAMES: &[&str] = &[
-    "claude", "node", "python", "cargo", "rustc", "uvicorn", "vite",
-    "next", "deno", "bun", "ruby", "postgres", "docker",
+    "claude", "node", "python", "cargo", "rustc", "uvicorn", "vite", "next", "deno", "bun", "ruby",
+    "postgres", "docker",
 ];
 
 /// Is this process name one we monitor? Matches default dev tools + any config extras
@@ -86,7 +86,7 @@ mod tests {
 
     #[test]
     fn ranks_by_cpu_then_mem() {
-        let mut v = vec![proc(1.0, 100), proc(9.0, 10), proc(1.0, 500)];
+        let mut v = [proc(1.0, 100), proc(9.0, 10), proc(1.0, 500)];
         v.sort_by(rank_proc);
         assert_eq!(v[0].cpu_pct, 9.0);
         assert_eq!(v[1].mem_bytes, 500); // tie on cpu (1.0) → higher mem first

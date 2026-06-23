@@ -1,8 +1,8 @@
 //! Application state and view stack.
 
+use ratatui::widgets::TableState;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use ratatui::widgets::TableState;
 
 use crate::collect::git::Worktree;
 use crate::collect::loc::LocRow;
@@ -24,20 +24,38 @@ pub struct DashboardData {
     pub repo: Option<crate::collect::git::RepoHealth>,
 }
 
-/// A scrollable in-app diff/log view.
+/// A scrollable in-app diff/log view. Scroll position lives in `App::detail_scroll`.
 #[derive(Clone, Default)]
-pub struct DiffView { pub title: String, pub lines: Vec<String>, pub scroll: u16 }
+pub struct DiffView {
+    pub title: String,
+    pub lines: Vec<String>,
+}
 
-/// A drill-in detail target.
-pub enum Detail { Worktree(usize), Job(usize), Container(usize), Diff(DiffView) }
+/// A drill-in detail target. The worktree detail keys off `App::last_wt_idx`/`wt_detail`,
+/// so it carries no index; job/container detail render directly by index.
+pub enum Detail {
+    Worktree,
+    Job(usize),
+    Container(usize),
+    Diff(DiffView),
+}
 
 /// The current screen.
-pub enum View { Dashboard, Expanded(WidgetKind), Detail(Detail) }
+pub enum View {
+    Dashboard,
+    Expanded(WidgetKind),
+    Detail(Detail),
+}
 
-/// Per-widget UI state (selection, sort, scroll).
+/// Per-widget UI state (selection, sort).
 #[derive(Default)]
 pub struct WidgetUiState {
-    pub table: TableState, pub sort_col: usize, pub sort_desc: bool, pub scroll: u16,
+    pub table: TableState,
+    // reserved: sortable column headers (click/`s` to re-sort a widget's table).
+    #[allow(dead_code)]
+    pub sort_col: usize,
+    #[allow(dead_code)]
+    pub sort_desc: bool,
 }
 
 pub struct App {
@@ -74,17 +92,22 @@ impl App {
             container_logs: Vec::new(),
         }
     }
-    pub fn focus_next(&mut self) { self.focus = self.focus.next(); }
-    pub fn focus_prev(&mut self) { self.focus = self.focus.prev(); }
-    pub fn expand_focused(&mut self) { self.view = View::Expanded(self.focus); }
+    pub fn focus_next(&mut self) {
+        self.focus = self.focus.next();
+    }
+    pub fn focus_prev(&mut self) {
+        self.focus = self.focus.prev();
+    }
+    pub fn expand_focused(&mut self) {
+        self.view = View::Expanded(self.focus);
+    }
     /// Pop one level: Diff -> Worktree detail -> Dashboard; everything else -> Dashboard.
     pub fn back(&mut self) {
         let cur = std::mem::replace(&mut self.view, View::Dashboard);
         self.view = match cur {
-            View::Detail(Detail::Diff(_)) => match self.last_wt_idx {
-                Some(i) => View::Detail(Detail::Worktree(i)),
-                None => View::Dashboard,
-            },
+            View::Detail(Detail::Diff(_)) if self.last_wt_idx.is_some() => {
+                View::Detail(Detail::Worktree)
+            }
             _ => View::Dashboard,
         };
     }
@@ -104,7 +127,8 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn expand_and_back() {
+    #[test]
+    fn expand_and_back() {
         let mut app = App::new(Theme::default());
         assert!(matches!(app.view, View::Dashboard));
         app.expand_focused();
@@ -112,10 +136,13 @@ mod tests {
         app.back();
         assert!(matches!(app.view, View::Dashboard));
     }
-    #[test] fn focus_next_wraps() {
+    #[test]
+    fn focus_next_wraps() {
         let mut app = App::new(Theme::default());
         let start = app.focus;
-        for _ in 0..WidgetKind::all().len() { app.focus_next(); }
+        for _ in 0..WidgetKind::all().len() {
+            app.focus_next();
+        }
         assert_eq!(app.focus, start);
     }
 }

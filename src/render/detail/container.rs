@@ -14,14 +14,7 @@ use crate::theme::Theme;
 /// Renders a bordered block titled ` Container · {name} ` containing the
 /// log lines as a scrollable `Paragraph`. A vertical scrollbar is shown on
 /// the right edge of the inner content area.
-pub fn render(
-    f: &mut Frame,
-    area: Rect,
-    name: &str,
-    logs: &[String],
-    theme: &Theme,
-    scroll: u16,
-) {
+pub fn render(f: &mut Frame, area: Rect, name: &str, logs: &[String], theme: &Theme, scroll: u16) {
     // Truncate the name so the title never wraps.
     let display_name: String = if name.chars().count() > 40 {
         let cut: String = name.chars().take(39).collect();
@@ -31,7 +24,10 @@ pub fn render(
     };
 
     let title = format!(" Container · {display_name} ");
-    let block = Block::default().borders(Borders::ALL).title(title).title_style(theme.title());
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .title_style(theme.title());
 
     if logs.is_empty() {
         let p = Paragraph::new(Line::from(Span::styled("no logs", theme.dim_style()))).block(block);
@@ -43,7 +39,9 @@ pub fn render(
     let lines: Vec<Line> = logs.iter().map(|l| Line::from(l.as_str())).collect();
 
     let inner = block.inner(area);
-    let p = Paragraph::new(Text::from(lines)).block(block).scroll((scroll, 0));
+    let p = Paragraph::new(Text::from(lines))
+        .block(block)
+        .scroll((scroll, 0));
     f.render_widget(p, area);
 
     // Scrollbar on the right side of the inner rect.
@@ -73,7 +71,12 @@ mod tests {
         term.draw(|f| {
             render(
                 f,
-                ratatui::layout::Rect { x: 0, y: 0, width: 100, height: 20 },
+                ratatui::layout::Rect {
+                    x: 0,
+                    y: 0,
+                    width: 100,
+                    height: 20,
+                },
                 "sovra-backend",
                 &logs,
                 &theme,
@@ -82,8 +85,14 @@ mod tests {
         })
         .unwrap();
         let s = buffer_text(term.backend().buffer());
-        assert!(s.contains("Container"), "expected 'Container' in block title");
-        assert!(s.contains("sovra-backend"), "expected container name in title");
+        assert!(
+            s.contains("Container"),
+            "expected 'Container' in block title"
+        );
+        assert!(
+            s.contains("sovra-backend"),
+            "expected container name in title"
+        );
         assert!(s.contains("server started"), "expected first log line");
     }
 
@@ -94,7 +103,12 @@ mod tests {
         term.draw(|f| {
             render(
                 f,
-                ratatui::layout::Rect { x: 0, y: 0, width: 80, height: 12 },
+                ratatui::layout::Rect {
+                    x: 0,
+                    y: 0,
+                    width: 80,
+                    height: 12,
+                },
                 "svc",
                 &[],
                 &theme,

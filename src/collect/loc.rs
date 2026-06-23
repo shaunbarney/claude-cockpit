@@ -46,8 +46,8 @@ pub fn loc_rows(root: &str) -> Vec<LocRow> {
 }
 
 use comfy_table::{
-    Attribute, Cell, CellAlignment, Color, ContentArrangement, Table,
-    modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL,
+    modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Attribute, Cell, CellAlignment, Color,
+    ContentArrangement, Table,
 };
 
 use crate::render::VIOLET;
@@ -60,23 +60,36 @@ pub fn loc_table(rows: &[LocRow]) -> Table {
         .set_content_arrangement(ContentArrangement::Dynamic);
     t.set_header(vec![
         Cell::new("Language").add_attribute(Attribute::Bold),
-        Cell::new("Files").add_attribute(Attribute::Bold).set_alignment(CellAlignment::Right),
-        Cell::new("Code").add_attribute(Attribute::Bold).set_alignment(CellAlignment::Right),
+        Cell::new("Files")
+            .add_attribute(Attribute::Bold)
+            .set_alignment(CellAlignment::Right),
+        Cell::new("Code")
+            .add_attribute(Attribute::Bold)
+            .set_alignment(CellAlignment::Right),
     ]);
 
     for r in rows {
         t.add_row(vec![
             Cell::new(&r.language).add_attribute(Attribute::Bold),
-            Cell::new(crate::util::thousands(r.files as u64)).fg(Color::DarkGrey).set_alignment(CellAlignment::Right),
-            Cell::new(crate::util::thousands(r.code as u64)).fg(Color::Cyan).set_alignment(CellAlignment::Right),
+            Cell::new(crate::util::thousands(r.files as u64))
+                .fg(Color::DarkGrey)
+                .set_alignment(CellAlignment::Right),
+            Cell::new(crate::util::thousands(r.code as u64))
+                .fg(Color::Cyan)
+                .set_alignment(CellAlignment::Right),
         ]);
     }
 
     let s = totals(rows);
     t.add_row(vec![
         Cell::new("TOTAL").add_attribute(Attribute::Bold),
-        Cell::new(crate::util::thousands(s.files as u64)).add_attribute(Attribute::Bold).set_alignment(CellAlignment::Right),
-        Cell::new(crate::util::thousands(s.code as u64)).fg(VIOLET).add_attribute(Attribute::Bold).set_alignment(CellAlignment::Right),
+        Cell::new(crate::util::thousands(s.files as u64))
+            .add_attribute(Attribute::Bold)
+            .set_alignment(CellAlignment::Right),
+        Cell::new(crate::util::thousands(s.code as u64))
+            .fg(VIOLET)
+            .add_attribute(Attribute::Bold)
+            .set_alignment(CellAlignment::Right),
     ]);
     t
 }
@@ -88,9 +101,23 @@ mod tests {
     #[test]
     fn sums_files_and_code() {
         let rows = vec![
-            LocRow { language: "Rust".into(), files: 3, code: 100 },
-            LocRow { language: "Python".into(), files: 2, code: 40 },
+            LocRow {
+                language: "Rust".into(),
+                files: 3,
+                code: 100,
+            },
+            LocRow {
+                language: "Python".into(),
+                files: 2,
+                code: 40,
+            },
         ];
-        assert_eq!(totals(&rows), LocTotals { files: 5, code: 140 });
+        assert_eq!(
+            totals(&rows),
+            LocTotals {
+                files: 5,
+                code: 140
+            }
+        );
     }
 }

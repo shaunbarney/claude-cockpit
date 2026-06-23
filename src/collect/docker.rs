@@ -23,8 +23,11 @@ fn extract_health(status: &str) -> Option<String> {
     let rest = &status[start + 1..];
     let end = rest.find(')')?;
     let word = &rest[..end];
-    matches!(word, "healthy" | "unhealthy" | "starting" | "health: starting")
-        .then(|| word.to_string())
+    matches!(
+        word,
+        "healthy" | "unhealthy" | "starting" | "health: starting"
+    )
+    .then(|| word.to_string())
 }
 
 /// Parse one `docker ps --format '{{json .}}'` line.
@@ -54,24 +57,23 @@ pub fn parse_ps_line(line: &str) -> Option<Container> {
 /// Parse a memory token like "256MiB" / "1.5GiB" / "0B" into bytes.
 pub fn parse_mem(tok: &str) -> u64 {
     let tok = tok.trim();
-    let (num, mult): (&str, f64) =
-        if let Some(n) = tok.strip_suffix("GiB") {
-            (n, 1024.0 * 1024.0 * 1024.0)
-        } else if let Some(n) = tok.strip_suffix("MiB") {
-            (n, 1024.0 * 1024.0)
-        } else if let Some(n) = tok.strip_suffix("KiB") {
-            (n, 1024.0)
-        } else if let Some(n) = tok.strip_suffix("GB") {
-            (n, 1e9)
-        } else if let Some(n) = tok.strip_suffix("MB") {
-            (n, 1e6)
-        } else if let Some(n) = tok.strip_suffix("kB") {
-            (n, 1e3)
-        } else if let Some(n) = tok.strip_suffix('B') {
-            (n, 1.0)
-        } else {
-            (tok, 1.0)
-        };
+    let (num, mult): (&str, f64) = if let Some(n) = tok.strip_suffix("GiB") {
+        (n, 1024.0 * 1024.0 * 1024.0)
+    } else if let Some(n) = tok.strip_suffix("MiB") {
+        (n, 1024.0 * 1024.0)
+    } else if let Some(n) = tok.strip_suffix("KiB") {
+        (n, 1024.0)
+    } else if let Some(n) = tok.strip_suffix("GB") {
+        (n, 1e9)
+    } else if let Some(n) = tok.strip_suffix("MB") {
+        (n, 1e6)
+    } else if let Some(n) = tok.strip_suffix("kB") {
+        (n, 1e3)
+    } else if let Some(n) = tok.strip_suffix('B') {
+        (n, 1.0)
+    } else {
+        (tok, 1.0)
+    };
     (num.trim().parse::<f64>().unwrap_or(0.0) * mult) as u64
 }
 

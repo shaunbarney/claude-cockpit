@@ -31,7 +31,12 @@ impl PriceTable {
 fn per_million(input_m: f64, output_m: f64) -> ModelPrice {
     let input = input_m / 1_000_000.0;
     let output = output_m / 1_000_000.0;
-    ModelPrice { input, output, cache_write: input * 1.25, cache_read: input * 0.1 }
+    ModelPrice {
+        input,
+        output,
+        cache_write: input * 1.25,
+        cache_read: input * 0.1,
+    }
 }
 
 /// Vendored Claude prices (USD / 1M tokens). Source: Anthropic pricing, 2026-06.
@@ -56,14 +61,18 @@ pub fn parse_litellm(json: &str) -> PriceTable {
         Ok(v) => v,
         Err(_) => return PriceTable::default(),
     };
-    let Some(obj) = v.as_object() else { return PriceTable::default() };
+    let Some(obj) = v.as_object() else {
+        return PriceTable::default();
+    };
     let mut m = HashMap::new();
     for (model, entry) in obj {
         let Some(input) = entry.get("input_cost_per_token").and_then(|x| x.as_f64()) else {
             continue;
         };
-        let output =
-            entry.get("output_cost_per_token").and_then(|x| x.as_f64()).unwrap_or(0.0);
+        let output = entry
+            .get("output_cost_per_token")
+            .and_then(|x| x.as_f64())
+            .unwrap_or(0.0);
         let cache_write = entry
             .get("cache_creation_input_token_cost")
             .and_then(|x| x.as_f64())
@@ -72,7 +81,15 @@ pub fn parse_litellm(json: &str) -> PriceTable {
             .get("cache_read_input_token_cost")
             .and_then(|x| x.as_f64())
             .unwrap_or(input * 0.1);
-        m.insert(model.clone(), ModelPrice { input, output, cache_write, cache_read });
+        m.insert(
+            model.clone(),
+            ModelPrice {
+                input,
+                output,
+                cache_write,
+                cache_read,
+            },
+        );
     }
     PriceTable(m)
 }
@@ -91,7 +108,11 @@ pub fn fetch_litellm() -> Option<PriceTable> {
         let _ = std::fs::write(home.join(".cockpit-prices.json"), &body);
     }
     let t = parse_litellm(&body);
-    if t.0.is_empty() { None } else { Some(t) }
+    if t.0.is_empty() {
+        None
+    } else {
+        Some(t)
+    }
 }
 
 /// Load prices: vendored defaults overlaid with the cached LiteLLM file if present.

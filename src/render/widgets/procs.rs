@@ -75,10 +75,11 @@ pub fn render(
                 Style::new()
             };
 
-            let name_cell =
-                Cell::from(Span::styled(p.name.clone(), Style::new().add_modifier(Modifier::BOLD)));
-            let cpu_cell =
-                Cell::from(Span::styled(format!("{:.1}%", p.cpu_pct), cpu_style));
+            let name_cell = Cell::from(Span::styled(
+                p.name.clone(),
+                Style::new().add_modifier(Modifier::BOLD),
+            ));
+            let cpu_cell = Cell::from(Span::styled(format!("{:.1}%", p.cpu_pct), cpu_style));
             let mem_cell = Cell::from(human_bytes(p.mem_bytes));
 
             if compact {
@@ -130,7 +131,12 @@ mod tests {
         term.draw(|f| {
             render(
                 f,
-                Rect { x: 0, y: 0, width: 120, height: 12 },
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 120,
+                    height: 12,
+                },
                 &procs,
                 &theme,
                 true,
@@ -141,6 +147,9 @@ mod tests {
         .unwrap();
         let s = buffer_text(term.backend().buffer());
         assert!(s.contains("claude"), "expected 'claude' in buffer");
-        assert!(s.contains("Processes"), "expected 'Processes' block title in buffer");
+        assert!(
+            s.contains("Processes"),
+            "expected 'Processes' block title in buffer"
+        );
     }
 }

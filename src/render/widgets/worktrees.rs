@@ -15,7 +15,10 @@ fn churn(pair: (u32, u32), show: bool) -> Span<'static> {
     if !show {
         return Span::styled("—", Style::new().fg(Color::DarkGray));
     }
-    Span::styled(format!("+{}/-{}", pair.0, pair.1), Style::new().fg(Color::Green))
+    Span::styled(
+        format!("+{}/-{}", pair.0, pair.1),
+        Style::new().fg(Color::Green),
+    )
 }
 
 /// Render the Worktrees table into `area`.
@@ -67,19 +70,36 @@ pub fn render(
         Row::new(["", "Worktree", "Ahead", "Dirty", "Age"])
             .style(Style::new().add_modifier(Modifier::BOLD))
     } else {
-        Row::new(["", "Worktree", "Ahead", "Dirty", "Committed", "Uncommitted", "Age"])
-            .style(Style::new().add_modifier(Modifier::BOLD))
+        Row::new([
+            "",
+            "Worktree",
+            "Ahead",
+            "Dirty",
+            "Committed",
+            "Uncommitted",
+            "Age",
+        ])
+        .style(Style::new().add_modifier(Modifier::BOLD))
     };
 
     let body: Vec<Row> = rows
         .iter()
         .map(|r| {
             let (dot_color, ahead_span) = if r.ahead > 0 {
-                (Color::Red, Span::styled(r.ahead.to_string(), Style::new().fg(Color::Red)))
+                (
+                    Color::Red,
+                    Span::styled(r.ahead.to_string(), Style::new().fg(Color::Red)),
+                )
             } else if r.dirty > 0 {
-                (Color::Yellow, Span::styled("0", Style::new().fg(Color::DarkGray)))
+                (
+                    Color::Yellow,
+                    Span::styled("0", Style::new().fg(Color::DarkGray)),
+                )
             } else {
-                (Color::Green, Span::styled("0", Style::new().fg(Color::DarkGray)))
+                (
+                    Color::Green,
+                    Span::styled("0", Style::new().fg(Color::DarkGray)),
+                )
             };
 
             let dirty_span = if r.dirty > 0 {
@@ -89,8 +109,7 @@ pub fn render(
             };
 
             let age_span = Span::styled(r.age.clone(), Style::new().fg(Color::DarkGray));
-            let name_span =
-                Span::styled(r.name.clone(), Style::new().add_modifier(Modifier::BOLD));
+            let name_span = Span::styled(r.name.clone(), Style::new().add_modifier(Modifier::BOLD));
 
             if compact {
                 Row::new(vec![

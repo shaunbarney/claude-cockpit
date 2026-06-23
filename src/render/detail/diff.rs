@@ -2,7 +2,9 @@
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
+use ratatui::widgets::{
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+};
 use ratatui::Frame;
 
 use crate::app::DiffView;
@@ -89,7 +91,6 @@ mod tests {
                 "+added line".into(),
                 "-removed line".into(),
             ],
-            scroll: 0,
         };
         let theme = Theme::default();
         let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();

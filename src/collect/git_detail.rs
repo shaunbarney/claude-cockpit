@@ -106,7 +106,15 @@ pub fn merge_status(path: &str) -> MergeStatus {
         .parse()
         .unwrap_or(0);
     // git >= 2.38: merge-tree --write-tree prints CONFLICT lines on conflict. Best-effort; empty on older git.
-    let mt = git(&["-C", path, "merge-tree", "--write-tree", "--name-only", "main", "HEAD"]);
+    let mt = git(&[
+        "-C",
+        path,
+        "merge-tree",
+        "--write-tree",
+        "--name-only",
+        "main",
+        "HEAD",
+    ]);
     let conflicts: Vec<String> = mt
         .lines()
         .filter(|l| l.contains("CONFLICT"))
@@ -117,11 +125,16 @@ pub fn merge_status(path: &str) -> MergeStatus {
 
 /// Gather full detail for a worktree at `path` (name/branch from caller).
 pub fn worktree_detail(path: &str, name: &str, branch: &str) -> WorktreeDetail {
-    let committed_files =
-        parse_numstat(&git(&["-C", path, "diff", "--numstat", "main...HEAD"]), false);
+    let committed_files = parse_numstat(
+        &git(&["-C", path, "diff", "--numstat", "main...HEAD"]),
+        false,
+    );
     let mut uncommitted_files =
         parse_numstat(&git(&["-C", path, "diff", "--numstat", "--cached"]), true);
-    uncommitted_files.extend(parse_numstat(&git(&["-C", path, "diff", "--numstat"]), false));
+    uncommitted_files.extend(parse_numstat(
+        &git(&["-C", path, "diff", "--numstat"]),
+        false,
+    ));
     let commits = parse_commit_log(&git(&[
         "-C",
         path,
@@ -166,7 +179,12 @@ mod tests {
         assert_eq!(f.len(), 3);
         assert_eq!(
             f[0],
-            FileChange { path: "src/a.rs".into(), added: 12, deleted: 3, staged: false }
+            FileChange {
+                path: "src/a.rs".into(),
+                added: 12,
+                deleted: 3,
+                staged: false
+            }
         );
         assert_eq!(f[2].added, 0); // binary "-" → 0
         assert_eq!(f[2].deleted, 0);
@@ -186,6 +204,9 @@ mod tests {
         assert_eq!(classify_merge(0, 0, vec![]), MergeStatus::UpToDate);
         assert_eq!(classify_merge(3, 0, vec![]), MergeStatus::Clean);
         assert_eq!(classify_merge(3, 2, vec![]), MergeStatus::Behind(2));
-        assert!(matches!(classify_merge(3, 0, vec!["x".into()]), MergeStatus::Conflicts(_)));
+        assert!(matches!(
+            classify_merge(3, 0, vec!["x".into()]),
+            MergeStatus::Conflicts(_)
+        ));
     }
 }

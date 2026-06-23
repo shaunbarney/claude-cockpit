@@ -22,10 +22,7 @@ pub fn publish_jobs(data: &Arc<Mutex<DashboardData>>, jobs: Vec<Job>) {
     data.lock().unwrap().jobs = jobs;
 }
 
-pub fn publish_usage(
-    data: &Arc<Mutex<DashboardData>>,
-    totals: crate::collect::usage::UsageTotals,
-) {
+pub fn publish_usage(data: &Arc<Mutex<DashboardData>>, totals: crate::collect::usage::UsageTotals) {
     data.lock().unwrap().usage = Some(totals);
 }
 
@@ -47,10 +44,7 @@ pub fn publish_endpoints(
     data.lock().unwrap().endpoints = list;
 }
 
-pub fn publish_procs(
-    data: &Arc<Mutex<DashboardData>>,
-    list: Vec<crate::collect::procs::Proc>,
-) {
+pub fn publish_procs(data: &Arc<Mutex<DashboardData>>, list: Vec<crate::collect::procs::Proc>) {
     data.lock().unwrap().procs = list;
 }
 
@@ -151,7 +145,11 @@ mod tests {
     fn publish_swaps_only_its_slice() {
         let data = Arc::new(Mutex::new(DashboardData::default()));
         // Seed the loc slice so we can prove worktrees publish doesn't clobber it.
-        data.lock().unwrap().loc.push(LocRow { language: "Rust".into(), files: 1, code: 10 });
+        data.lock().unwrap().loc.push(LocRow {
+            language: "Rust".into(),
+            files: 1,
+            code: 10,
+        });
 
         publish_worktrees(
             &data,

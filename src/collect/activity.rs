@@ -15,10 +15,19 @@ pub fn daily_counts(timestamps_ms: &[i64]) -> Vec<(String, u32)> {
 
 /// Read prompt timestamps (ms) from ~/.claude/history.jsonl (empty on IO failure).
 pub fn read_history() -> Vec<i64> {
-    let Some(home) = crate::util::claude_home() else { return vec![] };
-    let Ok(txt) = std::fs::read_to_string(home.join("history.jsonl")) else { return vec![] };
+    let Some(home) = crate::util::claude_home() else {
+        return vec![];
+    };
+    let Ok(txt) = std::fs::read_to_string(home.join("history.jsonl")) else {
+        return vec![];
+    };
     txt.lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok()?.get("timestamp")?.as_i64())
+        .filter_map(|l| {
+            serde_json::from_str::<Value>(l)
+                .ok()?
+                .get("timestamp")?
+                .as_i64()
+        })
         .collect()
 }
 

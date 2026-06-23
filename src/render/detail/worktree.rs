@@ -14,7 +14,14 @@ use crate::theme::Theme;
 fn combined_files(d: &WorktreeDetail) -> Vec<(&FileChange, DiffMode)> {
     let mut v: Vec<(&FileChange, DiffMode)> = Vec::new();
     for f in &d.uncommitted_files {
-        v.push((f, if f.staged { DiffMode::Staged } else { DiffMode::Unstaged }));
+        v.push((
+            f,
+            if f.staged {
+                DiffMode::Staged
+            } else {
+                DiffMode::Unstaged
+            },
+        ));
     }
     for f in &d.committed_files {
         v.push((f, DiffMode::Committed));
@@ -34,8 +41,8 @@ pub fn render(
 ) {
     // Top: 4-line activity + merge block; bottom: files (left) + commits (right).
     let vert = Layout::vertical([Constraint::Length(4), Constraint::Min(0)]).split(area);
-    let horiz = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(vert[1]);
+    let horiz =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(vert[1]);
 
     render_activity(f, vert[0], detail, jobs, theme);
     render_files(f, horiz[0], detail, theme, file_state);
@@ -81,9 +88,7 @@ fn render_activity(
     // Merge verdict line.
     let merge_line = match &detail.merge {
         MergeStatus::UpToDate => Line::styled("up to date with main", theme.dim_style()),
-        MergeStatus::Clean => {
-            Line::styled("clean — safe to merge", Style::new().fg(theme.ok))
-        }
+        MergeStatus::Clean => Line::styled("clean — safe to merge", Style::new().fg(theme.ok)),
         MergeStatus::Behind(n) => Line::styled(
             format!("behind main by {} — rebase before merge", n),
             Style::new().fg(theme.warn),
@@ -223,6 +228,9 @@ mod tests {
 
         let s = buffer_text(term.backend().buffer());
         assert!(s.contains("src/main.rs"), "buffer should contain file path");
-        assert!(s.contains("Commits"), "buffer should contain Commits header");
+        assert!(
+            s.contains("Commits"),
+            "buffer should contain Commits header"
+        );
     }
 }
