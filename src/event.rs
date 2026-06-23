@@ -53,12 +53,13 @@ fn row_count(app: &App, kind: WidgetKind) -> usize {
         WidgetKind::Worktrees => app.data.lock().unwrap().worktrees.len(),
         WidgetKind::Jobs => app.data.lock().unwrap().jobs.len(),
         WidgetKind::Docker => app.data.lock().unwrap().containers.len(),
+        WidgetKind::Ports => app.data.lock().unwrap().endpoints.len(),
         _ => 0, // extended per phase as more widgets become selectable
     }
 }
 
 fn is_table_widget(kind: WidgetKind) -> bool {
-    matches!(kind, WidgetKind::Worktrees | WidgetKind::Jobs | WidgetKind::Docker)
+    matches!(kind, WidgetKind::Worktrees | WidgetKind::Jobs | WidgetKind::Docker | WidgetKind::Ports)
 }
 
 fn move_selection(app: &mut App, down: bool) {

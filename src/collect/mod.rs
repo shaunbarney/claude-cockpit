@@ -5,5 +5,6 @@ pub mod git;
 pub mod git_detail;
 pub mod jobs;
 pub mod loc;
+pub mod ports;
 pub mod pricing;
 pub mod usage;

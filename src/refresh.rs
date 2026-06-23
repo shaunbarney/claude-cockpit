@@ -40,6 +40,13 @@ pub fn publish_containers(
     data.lock().unwrap().containers = list;
 }
 
+pub fn publish_endpoints(
+    data: &Arc<Mutex<DashboardData>>,
+    list: Vec<crate::collect::ports::Endpoint>,
+) {
+    data.lock().unwrap().endpoints = list;
+}
+
 /// One full gather + publish (used at startup and on `r`).
 pub fn refresh_now(root: &str, data: &Arc<Mutex<DashboardData>>) {
     git::fetch_origin(root);
@@ -51,6 +58,10 @@ pub fn refresh_now(root: &str, data: &Arc<Mutex<DashboardData>>) {
         crate::collect::activity::daily_counts(&crate::collect::activity::read_history()),
     );
     publish_containers(data, crate::collect::docker::gather_containers());
+    publish_endpoints(
+        data,
+        crate::collect::ports::gather_endpoints(&crate::config::load()),
+    );
 }
 
 /// Spawn the slow (10 s) refresh loop and a fast (2 s) jobs loop.
@@ -75,12 +86,16 @@ pub fn spawn(root: String, data: Arc<Mutex<DashboardData>>) -> Arc<AtomicBool> {
         }
     });
 
-    // Fast thread: jobs-only refresh every 2 s (20 × 100 ms ticks).
+    // Fast thread: jobs + endpoints refresh every 2 s (20 × 100 ms ticks).
     let s = stop.clone();
     let data3 = data.clone();
     thread::spawn(move || {
         while !s.load(Ordering::Relaxed) {
             publish_jobs(&data3, jobs::gather_jobs());
+            publish_endpoints(
+                &data3,
+                crate::collect::ports::gather_endpoints(&crate::config::load()),
+            );
             for _ in 0..20 {
                 if s.load(Ordering::Relaxed) {
                     break;
