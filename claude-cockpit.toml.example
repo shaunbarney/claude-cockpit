@@ -1,0 +1,25 @@
+# claude-cockpit configuration (optional).
+#
+# Copy to `claude-cockpit.toml` in your repo root, or to
+# `~/.config/claude-cockpit/config.toml`. With no config, the Ports widget
+# auto-discovers listening TCP ports and the Processes widget monitors a
+# built-in dev-tool set (claude, node, python, cargo, rustc, …).
+
+# Dev endpoints to health-check in the Ports widget.
+# Each gets a TCP connect + latency check and its owning PID via lsof.
+[[endpoints]]
+label = "frontend"
+port  = 3000
+
+[[endpoints]]
+label = "backend"
+host  = "127.0.0.1"   # optional; defaults to 127.0.0.1
+port  = 8080
+
+[[endpoints]]
+label = "api"
+port  = 8000
+
+# Extra process-name substrings to include in the Processes widget,
+# on top of the built-in set (case-insensitive substring match).
+processes = ["uvicorn", "vite"]
