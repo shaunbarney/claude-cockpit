@@ -81,6 +81,7 @@ fn draw_content(f: &mut Frame, app: &mut App) {
         Container(usize),
         Cost,
         CostModel(usize),
+        Activity,
         None,
     }
     let route = match &app.view {
@@ -90,6 +91,7 @@ fn draw_content(f: &mut Frame, app: &mut App) {
         View::Detail(Detail::Container(i)) => DetailRoute::Container(*i),
         View::Detail(Detail::Cost) => DetailRoute::Cost,
         View::Detail(Detail::CostModel(i)) => DetailRoute::CostModel(*i),
+        View::Detail(Detail::Activity) => DetailRoute::Activity,
         _ => DetailRoute::None,
     };
 
@@ -235,6 +237,25 @@ fn draw_content(f: &mut Frame, app: &mut App) {
                     outer[0],
                 ),
             }
+            let line = Line::from("  Esc back · ↑/↓ scroll · q quit");
+            f.render_widget(Paragraph::new(line).style(app.theme.dim_style()), outer[1]);
+            app.rects = FrameRects::default();
+            return;
+        }
+        DetailRoute::Activity => {
+            let outer = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
+            let (usage, activity) = {
+                let d = app.data.lock().unwrap();
+                (d.usage.clone(), d.activity.clone())
+            };
+            crate::render::detail::activity::render(
+                f,
+                outer[0],
+                usage.as_ref(),
+                &activity,
+                &app.theme,
+                app.detail_scroll,
+            );
             let line = Line::from("  Esc back · ↑/↓ scroll · q quit");
             f.render_widget(Paragraph::new(line).style(app.theme.dim_style()), outer[1]);
             app.rects = FrameRects::default();

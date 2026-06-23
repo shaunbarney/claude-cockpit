@@ -299,6 +299,14 @@ fn apply(app: &mut App, action: Action, root: &str) {
                 }
                 WidgetKind::Docker => open_container_detail(app),
                 WidgetKind::Cost => open_cost_detail(app),
+                WidgetKind::Activity => {
+                    if app.data.lock().unwrap().usage.is_some()
+                        || !app.data.lock().unwrap().activity.is_empty()
+                    {
+                        app.view = View::Detail(Detail::Activity);
+                        app.detail_scroll = 0;
+                    }
+                }
                 _ => {}
             },
             View::Detail(Detail::Worktree) => open_file_diff(app),

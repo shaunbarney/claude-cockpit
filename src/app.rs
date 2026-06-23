@@ -40,6 +40,7 @@ pub enum Detail {
     Diff(DiffView),
     Cost,
     CostModel(usize),
+    Activity,
 }
 
 /// The current screen.
