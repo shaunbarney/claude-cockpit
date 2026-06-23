@@ -37,7 +37,7 @@ pub fn thousands(n: u64) -> String {
     let b = s.as_bytes();
     let mut out = String::with_capacity(s.len() + s.len() / 3);
     for (i, c) in b.iter().enumerate() {
-        if i > 0 && (b.len() - i).is_multiple_of(3) {
+        if i > 0 && (b.len() - i) % 3 == 0 {
             out.push(',');
         }
         out.push(*c as char);
