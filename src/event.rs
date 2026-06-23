@@ -464,4 +464,56 @@ mod tests {
         assert_eq!(row_at(inner, 0, 6), Some(0)); // first data row
         assert_eq!(row_at(inner, 3, 7), Some(4)); // offset 3 + 2nd visible row
     }
+
+    #[test]
+    fn cost_drill_and_back() {
+        let mut app = App::new(Theme::default());
+        // Seed minimal usage so the drill is allowed.
+        {
+            let mut d = app.data.lock().unwrap();
+            d.usage = Some(crate::collect::usage::UsageTotals {
+                by_model: vec![crate::collect::usage::ModelUsage {
+                    model: "claude-x".into(),
+                    cost_usd: 1.0,
+                    input: 1,
+                    output: 1,
+                    cache_write: 0,
+                    cache_read: 0,
+                }],
+                ..Default::default()
+            });
+        }
+        app.focus = WidgetKind::Cost;
+        apply(&mut app, Action::Drill, ".");
+        assert!(matches!(app.view, View::Detail(Detail::Cost)));
+        // Enter on the selected model drills one level deeper.
+        apply(&mut app, Action::Drill, ".");
+        assert!(matches!(app.view, View::Detail(Detail::CostModel(0))));
+        // Back pops CostModel -> Cost, then Cost -> Dashboard.
+        apply(&mut app, Action::Back, ".");
+        assert!(matches!(app.view, View::Detail(Detail::Cost)));
+        apply(&mut app, Action::Back, ".");
+        assert!(matches!(app.view, View::Dashboard));
+    }
+
+    #[test]
+    fn repo_drill_opens_detail() {
+        let mut app = App::new(Theme::default());
+        {
+            let mut d = app.data.lock().unwrap();
+            d.repo = Some(crate::collect::git::RepoHealth {
+                branch: "main".into(),
+                ahead: 0,
+                behind: 0,
+                stash: 0,
+                dirty: 0,
+                last_fetch_secs: None,
+            });
+        }
+        app.focus = WidgetKind::Repo;
+        apply(&mut app, Action::Drill, ".");
+        assert!(matches!(app.view, View::Detail(Detail::Repo)));
+        apply(&mut app, Action::Back, ".");
+        assert!(matches!(app.view, View::Dashboard));
+    }
 }
