@@ -44,6 +44,7 @@ pub enum Detail {
     Code,
     Ports(usize),
     Procs(usize),
+    Repo,
 }
 
 /// The current screen.

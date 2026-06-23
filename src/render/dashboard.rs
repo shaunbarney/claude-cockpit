@@ -85,6 +85,7 @@ fn draw_content(f: &mut Frame, app: &mut App) {
         Code,
         Ports(usize),
         Procs(usize),
+        Repo,
         None,
     }
     let route = match &app.view {
@@ -98,6 +99,7 @@ fn draw_content(f: &mut Frame, app: &mut App) {
         View::Detail(Detail::Code) => DetailRoute::Code,
         View::Detail(Detail::Ports(i)) => DetailRoute::Ports(*i),
         View::Detail(Detail::Procs(i)) => DetailRoute::Procs(*i),
+        View::Detail(Detail::Repo) => DetailRoute::Repo,
         _ => DetailRoute::None,
     };
 
@@ -310,6 +312,15 @@ fn draw_content(f: &mut Frame, app: &mut App) {
                 ),
             }
             let line = Line::from("  Esc back · ↑/↓ scroll · q quit");
+            f.render_widget(Paragraph::new(line).style(app.theme.dim_style()), outer[1]);
+            app.rects = FrameRects::default();
+            return;
+        }
+        DetailRoute::Repo => {
+            let outer = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
+            let repo = { app.data.lock().unwrap().repo.clone() };
+            crate::render::detail::repo::render(f, outer[0], repo.as_ref(), &app.theme);
+            let line = Line::from("  Esc back · q quit");
             f.render_widget(Paragraph::new(line).style(app.theme.dim_style()), outer[1]);
             app.rects = FrameRects::default();
             return;

@@ -7,4 +7,5 @@ pub mod diff;
 pub mod job;
 pub mod ports;
 pub mod procs;
+pub mod repo;
 pub mod worktree;

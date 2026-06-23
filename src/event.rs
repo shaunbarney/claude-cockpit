@@ -339,7 +339,12 @@ fn apply(app: &mut App, action: Action, root: &str) {
                         }
                     }
                 }
-                _ => {}
+                WidgetKind::Repo => {
+                    if app.data.lock().unwrap().repo.is_some() {
+                        app.view = View::Detail(Detail::Repo);
+                        app.detail_scroll = 0;
+                    }
+                }
             },
             View::Detail(Detail::Worktree) => open_file_diff(app),
             View::Detail(Detail::Cost) => open_cost_model(app),
