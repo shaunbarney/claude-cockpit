@@ -326,6 +326,19 @@ fn apply(app: &mut App, action: Action, root: &str) {
                         }
                     }
                 }
+                WidgetKind::Procs => {
+                    if let Some(idx) = app
+                        .ui
+                        .get(&WidgetKind::Procs)
+                        .and_then(|u| u.table.selected())
+                    {
+                        let n = app.data.lock().unwrap().procs.len();
+                        if idx < n {
+                            app.view = View::Detail(Detail::Procs(idx));
+                            app.detail_scroll = 0;
+                        }
+                    }
+                }
                 _ => {}
             },
             View::Detail(Detail::Worktree) => open_file_diff(app),

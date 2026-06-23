@@ -43,6 +43,7 @@ pub enum Detail {
     Activity,
     Code,
     Ports(usize),
+    Procs(usize),
 }
 
 /// The current screen.

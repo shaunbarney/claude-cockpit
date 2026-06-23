@@ -84,6 +84,7 @@ fn draw_content(f: &mut Frame, app: &mut App) {
         Activity,
         Code,
         Ports(usize),
+        Procs(usize),
         None,
     }
     let route = match &app.view {
@@ -96,6 +97,7 @@ fn draw_content(f: &mut Frame, app: &mut App) {
         View::Detail(Detail::Activity) => DetailRoute::Activity,
         View::Detail(Detail::Code) => DetailRoute::Code,
         View::Detail(Detail::Ports(i)) => DetailRoute::Ports(*i),
+        View::Detail(Detail::Procs(i)) => DetailRoute::Procs(*i),
         _ => DetailRoute::None,
     };
 
@@ -286,6 +288,28 @@ fn draw_content(f: &mut Frame, app: &mut App) {
                 ),
             }
             let line = Line::from("  Esc back · q quit");
+            f.render_widget(Paragraph::new(line).style(app.theme.dim_style()), outer[1]);
+            app.rects = FrameRects::default();
+            return;
+        }
+        DetailRoute::Procs(idx) => {
+            let outer = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
+            let p = { app.data.lock().unwrap().procs.get(idx).cloned() };
+            match p {
+                Some(p) => crate::render::detail::procs::render(
+                    f,
+                    outer[0],
+                    &p,
+                    &app.theme,
+                    app.detail_scroll,
+                ),
+                None => f.render_widget(
+                    Paragraph::new("process no longer present — Esc to go back")
+                        .style(app.theme.dim_style()),
+                    outer[0],
+                ),
+            }
+            let line = Line::from("  Esc back · ↑/↓ scroll · q quit");
             f.render_widget(Paragraph::new(line).style(app.theme.dim_style()), outer[1]);
             app.rects = FrameRects::default();
             return;
