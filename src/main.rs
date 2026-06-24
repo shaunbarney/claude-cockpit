@@ -21,7 +21,7 @@ use render::Mode;
 #[derive(Parser)]
 #[command(
     name = "claude-cockpit",
-    about = "A btm-style terminal dashboard for Claude Code and your dev environment",
+    about = "A read-only terminal dashboard for Claude Code — agents, cost, rate-limit headroom, worktrees, Docker, and tool usage",
     version
 )]
 struct Cli {
