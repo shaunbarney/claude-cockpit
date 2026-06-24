@@ -1,6 +1,6 @@
 [package]
 name = "claude-cockpit"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.74"
 description = "A fast, read-only terminal dashboard for Claude Code — see your background agents, token/USD spend, rate-limit headroom, git worktrees, Docker, dev endpoints, and tool usage at a glance, all from local files with no daemon."

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`claude-cockpit` is a single-binary Rust TUI (a `btm`-style dashboard) that surfaces git worktrees, Claude Code background agents, token/USD cost, rate-limit proximity, Docker, dev endpoints, and tool usage. It reads only local files (`~/.claude/…`, plus repo `docker-compose`/`Dockerfile`s for endpoint discovery) and standard CLIs (`git`, `docker`, `lsof`) — no daemon, no network for the core, **read-only** (it never kills a job, stops a container, or touches branches). Every data source is best-effort: a missing tool or file yields an empty widget, never a crash.
+`claude-cockpit` is a single-binary Rust TUI dashboard that surfaces git worktrees, Claude Code background agents, token/USD cost, rate-limit proximity, Docker, dev endpoints, and tool usage. It reads only local files (`~/.claude/…`, plus repo `docker-compose`/`Dockerfile`s for endpoint discovery) and standard CLIs (`git`, `docker`, `lsof`) — no daemon, no network for the core, **read-only** (it never kills a job, stops a container, or touches branches). Every data source is best-effort: a missing tool or file yields an empty widget, never a crash.
 
 ## Commands
 

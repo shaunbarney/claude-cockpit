@@ -5,14 +5,15 @@
 <h1 align="center">claude-cockpit</h1>
 
 <p align="center">
-  A <a href="https://github.com/ClementTsang/bottom"><code>btm</code></a>-style terminal dashboard for <strong>Claude Code</strong> and your dev environment —
+  A live, read-only terminal dashboard for <strong>Claude Code</strong> and your dev environment —
   git worktrees, background agents, token/USD cost, rate-limit proximity, Docker, dev endpoints, code stats, and tool usage in one responsive TUI.
 </p>
 
 <p align="center">
   <a href="https://github.com/shaunbarney/claude-cockpit/actions/workflows/ci.yml"><img src="https://github.com/shaunbarney/claude-cockpit/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://crates.io/crates/claude-cockpit"><img src="https://img.shields.io/crates/v/claude-cockpit.svg" alt="crates.io"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://crates.io/crates/claude-cockpit"><img src="https://img.shields.io/crates/v/claude-cockpit?logo=rust&color=2e5ee8" alt="crates.io"></a>
+  <a href="https://docs.rs/claude-cockpit"><img src="https://img.shields.io/docsrs/claude-cockpit?logo=docsdotrs" alt="docs.rs"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/crates/l/claude-cockpit?color=blue" alt="License: MIT"></a>
 </p>
 
 ---
@@ -147,7 +148,7 @@ cargo clippy
 
 ## Acknowledgements
 
-Inspired by [`bottom`](https://github.com/ClementTsang/bottom) (`btm`) and built on [`ratatui`](https://ratatui.rs). LOC counting by [`tokei`](https://github.com/XAMPPRocky/tokei); pricing data from [LiteLLM](https://github.com/BerriAI/litellm).
+Built on [`ratatui`](https://ratatui.rs). LOC counting by [`tokei`](https://github.com/XAMPPRocky/tokei); pricing data from [LiteLLM](https://github.com/BerriAI/litellm).
 
 ## License
 

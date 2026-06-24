@@ -14,7 +14,7 @@ mod widget;
 use clap::Parser;
 use render::Mode;
 
-/// claude-cockpit — a btm-style terminal dashboard for Claude Code and your dev environment.
+/// claude-cockpit — a live, read-only terminal dashboard for Claude Code and your dev environment.
 ///
 /// Run with no arguments to launch the interactive cockpit. The one-shot flags
 /// (`--worktrees`, `--code`, `--watch`) print a static table instead, handy for scripts.
