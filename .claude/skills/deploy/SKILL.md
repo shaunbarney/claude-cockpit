@@ -11,17 +11,24 @@ Reproduce CI **exactly** before every push. The most common miss is rustfmt
 (easy to forget) and clippy's `-D warnings` + `--all-targets` (catches issues a
 plain `cargo clippy` does not).
 
-## The gate — run all three, in order, from the repo root
+## The gate — run all four, in order, from the repo root
 
 ```bash
-cargo fmt --all -- --check          # CI fails on ANY unformatted line
-cargo clippy --all-targets -- -D warnings   # warnings are errors; includes tests
+cargo fmt --all -- --check                      # CI fails on ANY unformatted line
+cargo clippy --all-targets -- -D warnings       # warnings are errors; includes tests
 cargo test --all
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features   # docs.rs parity
 ```
 
 If `fmt --check` fails, run `cargo fmt --all` to fix it, then re-run the gate.
-Fix clippy/test failures in the code — never silence them with `#[allow]` unless
-there's a documented reason. Do not push until **all three** exit 0.
+Fix clippy/test/doc failures in the code — never silence them with `#[allow]`
+unless there's a documented reason. Do not push until **all four** exit 0.
+
+The doc step catches what breaks docs.rs after publish: rustdoc lints (e.g. a
+literal `<...>` in a doc comment is parsed as an unclosed HTML tag — wrap it in
+backticks) and structural issues. Note docs.rs documents the **library** target,
+so the crate keeps a `src/lib.rs` (the binary in `src/main.rs` is a thin wrapper
+that `use`s it); never collapse it back to a bin-only crate or docs.rs goes red.
 
 ## Push
 

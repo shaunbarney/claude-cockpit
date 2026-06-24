@@ -117,7 +117,7 @@ pub struct RepoHealth {
     pub last_fetch_secs: Option<u64>,
 }
 
-/// Parse `git rev-list --left-right --count HEAD...origin/main` ("ahead<TAB>behind") -> (ahead, behind).
+/// Parse `git rev-list --left-right --count HEAD...origin/main` (`"ahead\tbehind"`) -> (ahead, behind).
 pub fn parse_ahead_behind(s: &str) -> (u32, u32) {
     let mut it = s.split_whitespace();
     let ahead = it.next().and_then(|x| x.parse().ok()).unwrap_or(0);

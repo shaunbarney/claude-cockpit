@@ -1,15 +1,4 @@
-mod app;
-mod collect;
-mod config;
-mod event;
-mod graph;
-mod layout;
-mod refresh;
-mod render;
-mod theme;
-mod trend;
-mod util;
-mod widget;
+use claude_cockpit::{collect, event, render};
 
 use clap::Parser;
 use render::Mode;
