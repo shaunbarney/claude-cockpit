@@ -6,7 +6,7 @@
 
 <p align="center">
   A <a href="https://github.com/ClementTsang/bottom"><code>btm</code></a>-style terminal dashboard for <strong>Claude Code</strong> and your dev environment —
-  git worktrees, background agents, token/USD cost, rate-limit proximity, Docker, and tool usage in one responsive TUI.
+  git worktrees, background agents, token/USD cost, rate-limit proximity, Docker, dev endpoints, code stats, and tool usage in one responsive TUI.
 </p>
 
 <p align="center">
@@ -17,7 +17,7 @@
 
 ---
 
-`claude-cockpit` is a single, fast Rust TUI that answers "what's going on?" across everything you run while developing with Claude Code. It reads only local files (`~/.claude/…`) and standard CLIs (`git`, `docker`, `lsof`) — no network required for the core, no daemon, no telemetry.
+`claude-cockpit` is a single, fast Rust TUI that answers "what's going on?" across everything you run while developing with Claude Code. It reads only local files (`~/.claude/…` and files in your repo) and standard CLIs (`git`, `docker`, `lsof`) — no network required for the core, no daemon, no telemetry.
 
 The layout reflows to your terminal: a multi-column grid on a wide screen, a single column on a narrow one, and a "resize me" guard when there's truly no room. Drive it with the keyboard or the mouse.
 
@@ -27,7 +27,7 @@ The layout reflows to your terminal: a multi-column grid on a wide screen, a sin
 |--------|---------------|
 | **Worktrees** | Every git worktree ranked ahead → dirty → clean, with committed/uncommitted churn and age. Drill in for the owning Claude job, changed files, an in-app diff, recent commits, and a merge-readiness verdict. |
 | **Jobs** | Live Claude Code background agents from `~/.claude/jobs/*/state.json` — state, tempo, in-flight tasks, intent, age, stuck-detection. Drill in for the job's `timeline.jsonl` event feed. |
-| **Cost** | Per-day / per-session / per-model token totals and **USD cost** from your transcripts (deduped by `message.id`), with a braille spend-trend and cache-hit %. |
+| **Cost** | Total / today / per-model token totals and **USD cost** from your transcripts (deduped by `message.id`), with a braille spend-trend and cache-hit %. Drill in for a per-day and per-model breakdown. |
 | **Rate** | Rate-limit proximity: a rolling **5-hour prompt** gauge (the unit the Claude Code subscription limit actually uses) vs your plan cap, an **OTPM** output-tokens-per-minute burn gauge, a reset countdown, and a token-rate sparkline. Set `plan` in config for a true %; otherwise it auto-scales to your busiest observed window. |
 | **Code** | Total lines by language (code + comments + blanks, à la `wc -l`; via `tokei`), counted over **git-tracked files only** (`git ls-files`) — so gitignored paths, build output, and sibling worktrees don't inflate it. Per-language icons, colours, and a size bar. |
 | **Docker** | Containers with health, CPU/mem, ports. Drill in for recent logs. |
@@ -61,10 +61,12 @@ claude-cockpit
 ## Usage
 
 ```
-claude-cockpit            # launch the interactive cockpit (default)
-claude-cockpit --worktrees   # one-shot: print the worktrees table and exit
-claude-cockpit --code        # one-shot: worktrees + lines-of-code
-claude-cockpit --watch       # one-shot render, refreshed in place
+claude-cockpit                 # launch the interactive cockpit (default)
+claude-cockpit --tui           # force the interactive cockpit explicitly
+claude-cockpit --worktrees     # one-shot: print the worktrees table and exit
+claude-cockpit --code          # one-shot: worktrees + repo lines, stacked
+claude-cockpit --watch         # one-shot render, refreshed in place
+claude-cockpit --watch --interval 5   # …refreshing every 5s (default 10)
 claude-cockpit --help
 ```
 
@@ -74,7 +76,7 @@ claude-cockpit --help
 |-----|--------|
 | `Tab` / `←` `→` / `h` `l` | Move focus between widgets |
 | `↑` `↓` / `j` `k` | Select a row, or scroll inside a detail/diff view |
-| `Enter` / click | Drill into the focused row (worktree · job · container) |
+| `Enter` / click | Drill into the focused row/widget (worktree · job · container · cost · ports · repo) |
 | `e` | Expand the focused widget to full screen |
 | `r` | Refresh now |
 | `?` | Toggle the help overlay |
@@ -124,9 +126,11 @@ See [`claude-cockpit.toml.example`](claude-cockpit.toml.example).
 
 Everything is read locally and best-effort — a missing tool or file just yields an empty widget, never a crash:
 
-- **Jobs / activity** — `~/.claude/jobs/*/state.json`, `~/.claude/jobs/*/timeline.jsonl`, `~/.claude/history.jsonl`
+- **Jobs** — `~/.claude/jobs/*/state.json`, `~/.claude/jobs/*/timeline.jsonl`
 - **Cost** — `~/.claude/projects/**/*.jsonl` (incrementally scanned, cached by mtime). Prices are a vendored Claude table, refreshed from [LiteLLM](https://github.com/BerriAI/litellm) when online and cached to `~/.claude/.cockpit-prices.json`.
-- **Git** — `git` CLI in the current repo
+- **Rate** — output-token usage from those same transcripts (OTPM) + prompt timestamps from `~/.claude/history.jsonl` (the rolling 5-hour prompt window)
+- **Code** — [`tokei`](https://github.com/XAMPPRocky/tokei) over `git ls-files` (git-tracked files only)
+- **Git / Repo / Worktrees** — `git` CLI in the current repo
 - **Docker** — `docker ps` / `docker stats` / `docker logs`
 - **Ports** — `docker-compose`/`Dockerfile` port mappings in the repo, then `lsof` + TCP connect
 - **Tools** — `tool_use` blocks in `~/.claude/projects/**/*.jsonl` (deduped by `message.id`)
