@@ -86,10 +86,7 @@ fn row_count(app: &App, kind: WidgetKind) -> usize {
 fn is_table_widget(kind: WidgetKind) -> bool {
     matches!(
         kind,
-        WidgetKind::Worktrees
-            | WidgetKind::Jobs
-            | WidgetKind::Docker
-            | WidgetKind::Ports
+        WidgetKind::Worktrees | WidgetKind::Jobs | WidgetKind::Docker | WidgetKind::Ports
     )
 }
 

@@ -100,7 +100,11 @@ fn host_port_from_short(val: &str) -> Option<u16> {
 /// (`published: 8080` or `published: "8080"`).
 fn published_port(line: &str) -> Option<u16> {
     let rest = line.split("published:").nth(1)?;
-    rest.trim().trim_matches('"').trim_matches('\'').parse().ok()
+    rest.trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .parse()
+        .ok()
 }
 
 /// Parse host-reachable ports out of a docker-compose file. Tracks the current
@@ -127,16 +131,25 @@ pub fn parse_compose_ports(yaml: &str) -> Vec<DiscoveredPort> {
                     let item = rest.trim();
                     if item.contains("published:") {
                         if let Some(p) = published_port(item) {
-                            out.push(DiscoveredPort { label: service.clone(), port: p });
+                            out.push(DiscoveredPort {
+                                label: service.clone(),
+                                port: p,
+                            });
                         }
                     } else if !item.starts_with("target:") && !item.starts_with("protocol:") {
                         if let Some(p) = host_port_from_short(item) {
-                            out.push(DiscoveredPort { label: service.clone(), port: p });
+                            out.push(DiscoveredPort {
+                                label: service.clone(),
+                                port: p,
+                            });
                         }
                     }
                 } else if trimmed.contains("published:") {
                     if let Some(p) = published_port(trimmed) {
-                        out.push(DiscoveredPort { label: service.clone(), port: p });
+                        out.push(DiscoveredPort {
+                            label: service.clone(),
+                            port: p,
+                        });
                     }
                 }
                 continue;
@@ -171,14 +184,20 @@ pub fn parse_dockerfile_expose(text: &str, label: &str) -> Vec<DiscoveredPort> {
     for line in text.lines() {
         let mut toks = line.split_whitespace();
         // The EXPOSE keyword must be the first token on the line.
-        if !toks.next().is_some_and(|w| w.eq_ignore_ascii_case("expose")) {
+        if !toks
+            .next()
+            .is_some_and(|w| w.eq_ignore_ascii_case("expose"))
+        {
             continue;
         }
         for tok in toks {
             let tok = tok.split('/').next().unwrap_or(tok); // drop /tcp|/udp
             let first = tok.split('-').next().unwrap_or(tok); // range -> first
             if let Ok(p) = first.parse::<u16>() {
-                out.push(DiscoveredPort { label: label.to_string(), port: p });
+                out.push(DiscoveredPort {
+                    label: label.to_string(),
+                    port: p,
+                });
             }
         }
     }
@@ -268,7 +287,9 @@ pub fn gather_endpoints(cfg: &crate::config::Config, root: &str) -> Vec<Endpoint
 
     if cfg.discover_endpoints {
         for d in discover_docker_ports(std::path::Path::new(root)) {
-            let dup = eps.iter().any(|e| e.port == d.port && e.host == "127.0.0.1");
+            let dup = eps
+                .iter()
+                .any(|e| e.port == d.port && e.host == "127.0.0.1");
             if !dup {
                 eps.push(check(&d.label, "127.0.0.1", d.port));
             }
@@ -347,7 +368,13 @@ services:
         // Legacy v1 compose: services at the top level, no `services:` key.
         let yaml = "api:\n  ports:\n    - 4000:4000\n";
         let ports = parse_compose_ports(yaml);
-        assert_eq!(ports, vec![DiscoveredPort { label: "api".into(), port: 4000 }]);
+        assert_eq!(
+            ports,
+            vec![DiscoveredPort {
+                label: "api".into(),
+                port: 4000
+            }]
+        );
     }
 
     #[test]
@@ -364,7 +391,13 @@ services:
         // Comment/box-drawing lines must not be byte-sliced (regression).
         let txt = "# ─── build ───\nFROM rust\nEXPOSE 8080\n# café ☕\n";
         let ports = parse_dockerfile_expose(txt, "svc");
-        assert_eq!(ports, vec![DiscoveredPort { label: "svc".into(), port: 8080 }]);
+        assert_eq!(
+            ports,
+            vec![DiscoveredPort {
+                label: "svc".into(),
+                port: 8080
+            }]
+        );
     }
 
     #[test]

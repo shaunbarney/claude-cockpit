@@ -120,7 +120,10 @@ pub fn render(f: &mut Frame, area: Rect, rows: &[LocRow], theme: &Theme, focused
                     thousands(r.files as u64),
                     Style::new().fg(Color::DarkGray),
                 )),
-                Cell::from(Span::styled(thousands(r.lines as u64), Style::new().fg(color))),
+                Cell::from(Span::styled(
+                    thousands(r.lines as u64),
+                    Style::new().fg(color),
+                )),
                 Cell::from(Span::styled(bar(frac, 8), Style::new().fg(color))),
             ])
         })

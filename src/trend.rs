@@ -70,10 +70,7 @@ mod tests {
     fn single_day_buckets_hourly_and_fills_gaps() {
         // Events at hour 0, hour 0, and hour 3 of the same day.
         let base = 10 * D; // aligned to a day boundary
-        let t = bucketize(
-            &[(base, 1.0), (base + 5_000, 1.0), (base + 3 * H, 1.0)],
-            30,
-        );
+        let t = bucketize(&[(base, 1.0), (base + 5_000, 1.0), (base + 3 * H, 1.0)], 30);
         // Buckets for hours 0..=3 → length 4, gaps zero-filled.
         assert_eq!(t.values, vec![2.0, 0.0, 0.0, 1.0]);
         assert_eq!(t.label, "last 4h");

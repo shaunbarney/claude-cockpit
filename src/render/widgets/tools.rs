@@ -46,7 +46,14 @@ fn short_name(name: &str) -> &str {
 }
 
 /// Render the Tools table into `area`.
-pub fn render(f: &mut Frame, area: Rect, tools: &[ToolStat], theme: &Theme, focused: bool, band: Band) {
+pub fn render(
+    f: &mut Frame,
+    area: Rect,
+    tools: &[ToolStat],
+    theme: &Theme,
+    focused: bool,
+    band: Band,
+) {
     let border_style = if focused {
         Style::new().fg(theme.focus_border)
     } else {
@@ -69,7 +76,11 @@ pub fn render(f: &mut Frame, area: Rect, tools: &[ToolStat], theme: &Theme, focu
     let widths: &[Constraint] = if compact {
         &[Constraint::Min(10), Constraint::Length(7)]
     } else {
-        &[Constraint::Min(14), Constraint::Length(9), Constraint::Min(10)]
+        &[
+            Constraint::Min(14),
+            Constraint::Length(9),
+            Constraint::Min(10),
+        ]
     };
 
     let rows: Vec<Row> = tools
@@ -79,12 +90,18 @@ pub fn render(f: &mut Frame, area: Rect, tools: &[ToolStat], theme: &Theme, focu
             let count = thousands(t.count);
             if compact {
                 Row::new(vec![
-                    Cell::from(Span::styled(name, Style::new().add_modifier(Modifier::BOLD))),
+                    Cell::from(Span::styled(
+                        name,
+                        Style::new().add_modifier(Modifier::BOLD),
+                    )),
                     Cell::from(Span::styled(count, Style::new().fg(theme.accent))),
                 ])
             } else {
                 Row::new(vec![
-                    Cell::from(Span::styled(name, Style::new().add_modifier(Modifier::BOLD))),
+                    Cell::from(Span::styled(
+                        name,
+                        Style::new().add_modifier(Modifier::BOLD),
+                    )),
                     Cell::from(Span::styled(count, Style::new().fg(Color::DarkGray))),
                     Cell::from(Span::styled(
                         bar(t.count as f64 / max, 10),
@@ -125,14 +142,25 @@ mod tests {
     fn renders_tools() {
         use ratatui::{backend::TestBackend, Terminal};
         let tools = vec![
-            ToolStat { name: "Bash".into(), count: 1204 },
-            ToolStat { name: "Edit".into(), count: 890 },
+            ToolStat {
+                name: "Bash".into(),
+                count: 1204,
+            },
+            ToolStat {
+                name: "Edit".into(),
+                count: 890,
+            },
         ];
         let mut term = Terminal::new(TestBackend::new(80, 10)).unwrap();
         term.draw(|f| {
             render(
                 f,
-                Rect { x: 0, y: 0, width: 80, height: 10 },
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 80,
+                    height: 10,
+                },
                 &tools,
                 &Theme::default(),
                 false,
@@ -140,7 +168,13 @@ mod tests {
             );
         })
         .unwrap();
-        let s: String = term.backend().buffer().content.iter().map(|c| c.symbol()).collect();
+        let s: String = term
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
         assert!(s.contains("Tools"));
         assert!(s.contains("Bash"));
         assert!(s.contains("1,204"));

@@ -83,7 +83,9 @@ pub fn render(
 
     // Cache-hit %, folded into the summary line (still useful context).
     let total_tok = totals.cache_read + totals.cache_write + totals.fresh_input;
-    let cache_pct = (totals.cache_read * 100).checked_div(total_tok).unwrap_or(0);
+    let cache_pct = (totals.cache_read * 100)
+        .checked_div(total_tok)
+        .unwrap_or(0);
 
     let plan = if rate.plan_label.is_empty() {
         "plan? run /status".to_string()
@@ -262,7 +264,12 @@ mod tests {
         term.draw(|f| {
             render(
                 f,
-                Rect { x: 0, y: 0, width: 120, height: 16 },
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 120,
+                    height: 16,
+                },
                 Some(&totals),
                 &Theme::default(),
                 false,

@@ -47,11 +47,7 @@ pub struct RateLimit {
 /// Approximate 5-hour prompt cap and display label for a configured plan name.
 /// Figures are post-2026-05-06 doubling and approximate — Anthropic tunes them.
 pub fn plan_prompt_cap(plan: &str) -> Option<(u64, &'static str)> {
-    match plan
-        .to_lowercase()
-        .replace([' ', '_', '-'], "")
-        .as_str()
-    {
+    match plan.to_lowercase().replace([' ', '_', '-'], "").as_str() {
         "pro" => Some((20, "Pro")),
         "max5x" | "max5" | "max" => Some((100, "Max 5x")),
         "max20x" | "max20" => Some((400, "Max 20x")),

@@ -10,8 +10,8 @@ use crate::collect::pricing::PriceTable;
 /// One deduplicated assistant message's token usage.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageRecord {
-    pub day: String,         // YYYY-MM-DD
-    pub ts_ms: Option<i64>,  // event time (epoch ms) for sub-day trend bucketing
+    pub day: String,        // YYYY-MM-DD
+    pub ts_ms: Option<i64>, // event time (epoch ms) for sub-day trend bucketing
     pub model: String,
     pub input: u64,
     pub output: u64,
@@ -42,7 +42,7 @@ pub struct UsageTotals {
     pub by_model: Vec<ModelUsage>, // descending by cost
     pub by_model_day: std::collections::HashMap<String, Vec<DayUsage>>, // model -> ascending days
     pub cost_trend: crate::trend::Trend, // adaptive spend curve (hourly today, daily over weeks)
-    pub rate: RateStats,                 // rolling-window rate-limit proximity
+    pub rate: RateStats,           // rolling-window rate-limit proximity
     pub total_cost_usd: f64,
     pub cache_read: u64,
     pub cache_write: u64,
@@ -62,8 +62,8 @@ pub struct RateStats {
     // Subscription 5-hour rolling window (limit unit = prompts).
     pub prompts_5h: u64,
     pub cap_prompts_5h: u64,
-    pub auto_prompts_5h: bool,    // cap auto-scaled (no plan/prompts_5h in config)
-    pub plan_label: String,       // "Pro" / "Max 5x" / "Max 20x" / "" if unknown
+    pub auto_prompts_5h: bool, // cap auto-scaled (no plan/prompts_5h in config)
+    pub plan_label: String,    // "Pro" / "Max 5x" / "Max 20x" / "" if unknown
     pub resets_in_secs: Option<u64>, // until the oldest in-window prompt ages out
     // API per-minute output-token burn (OTPM — the tightest API limit).
     pub output_1m: u64,
@@ -124,8 +124,13 @@ pub fn rate_stats(
     let mut ev: Vec<(i64, u64, u64)> = records
         .iter()
         .filter_map(|r| {
-            r.ts_ms
-                .map(|t| (t, r.input + r.output + r.cache_write + r.cache_read, r.output))
+            r.ts_ms.map(|t| {
+                (
+                    t,
+                    r.input + r.output + r.cache_write + r.cache_read,
+                    r.output,
+                )
+            })
         })
         .collect();
     ev.sort_by_key(|e| e.0);
@@ -162,7 +167,11 @@ pub fn rate_stats(
         // pe is already ascending iff prompt_ts is; sort to be safe.
         let mut pe = pe;
         pe.sort_by_key(|e| e.0);
-        (max_window_sum(&pe, WINDOW_5H_MS, false), String::new(), true)
+        (
+            max_window_sum(&pe, WINDOW_5H_MS, false),
+            String::new(),
+            true,
+        )
     };
 
     RateStats {
@@ -407,7 +416,12 @@ mod tests {
             rec(now - 10_000, 300, 30),          // 10s ago: inside both windows
         ];
         // One prompt 6h ago (out of window) and three within the 5h window.
-        let prompts = vec![now - 6 * 3_600_000, now - 2 * 3_600_000, now - 30_000, now - 10_000];
+        let prompts = vec![
+            now - 6 * 3_600_000,
+            now - 2 * 3_600_000,
+            now - 30_000,
+            now - 10_000,
+        ];
         let cfg = crate::config::RateLimit::default(); // all auto, no plan
         let r = rate_stats(&recs, &prompts, now, &cfg);
 

@@ -28,7 +28,9 @@ pub fn parse_tool_events(jsonl: &str) -> Vec<(String, i64)> {
         if v.get("type").and_then(|x| x.as_str()) != Some("assistant") {
             continue;
         }
-        let Some(msg) = v.get("message") else { continue };
+        let Some(msg) = v.get("message") else {
+            continue;
+        };
         let id = msg.get("id").and_then(|x| x.as_str()).unwrap_or("");
         if id.is_empty() || !seen.insert(id.to_string()) {
             continue;
@@ -135,7 +137,13 @@ mod tests {
             .unwrap()
             .timestamp_millis();
         let stats = aggregate(&ev, now, 7);
-        assert_eq!(stats[0], ToolStat { name: "Bash".into(), count: 2 });
+        assert_eq!(
+            stats[0],
+            ToolStat {
+                name: "Bash".into(),
+                count: 2
+            }
+        );
         assert_eq!(stats.iter().find(|s| s.name == "Edit").unwrap().count, 1);
         assert_eq!(stats.iter().find(|s| s.name == "Read").unwrap().count, 1);
     }

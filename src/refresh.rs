@@ -150,7 +150,10 @@ pub fn spawn(root: String, data: Arc<Mutex<DashboardData>>) -> Arc<AtomicBool> {
         while !s.load(Ordering::Relaxed) {
             publish_usage(&data, crate::collect::usage::scan_all(&mut cache));
             let now_ms = chrono::Utc::now().timestamp_millis();
-            publish_tools(&data, crate::collect::tools::scan_tools(&mut tool_cache, now_ms, 7));
+            publish_tools(
+                &data,
+                crate::collect::tools::scan_tools(&mut tool_cache, now_ms, 7),
+            );
             for _ in 0..100 {
                 if s.load(Ordering::Relaxed) {
                     break;
