@@ -6,7 +6,7 @@
 
 <p align="center">
   A <a href="https://github.com/ClementTsang/bottom"><code>btm</code></a>-style terminal dashboard for <strong>Claude Code</strong> and your dev environment —
-  git worktrees, background agents, token/USD cost, Docker, and dev processes in one responsive TUI.
+  git worktrees, background agents, token/USD cost, rate-limit proximity, Docker, and tool usage in one responsive TUI.
 </p>
 
 <p align="center">
@@ -28,11 +28,11 @@ The layout reflows to your terminal: a multi-column grid on a wide screen, a sin
 | **Worktrees** | Every git worktree ranked ahead → dirty → clean, with committed/uncommitted churn and age. Drill in for the owning Claude job, changed files, an in-app diff, recent commits, and a merge-readiness verdict. |
 | **Jobs** | Live Claude Code background agents from `~/.claude/jobs/*/state.json` — state, tempo, in-flight tasks, intent, age, stuck-detection. Drill in for the job's `timeline.jsonl` event feed. |
 | **Cost** | Per-day / per-session / per-model token totals and **USD cost** from your transcripts (deduped by `message.id`), with a braille spend-trend and cache-hit %. |
-| **Activity** | Cache-efficiency gauge (read vs write vs fresh) and a prompt-cadence sparkline from `~/.claude/history.jsonl`. |
-| **Code** | Lines of code by language (via `tokei`). |
+| **Rate** | Rate-limit proximity: a rolling **5-hour prompt** gauge (the unit the Claude Code subscription limit actually uses) vs your plan cap, an **OTPM** output-tokens-per-minute burn gauge, a reset countdown, and a token-rate sparkline. Set `plan` in config for a true %; otherwise it auto-scales to your busiest observed window. |
+| **Code** | Total lines by language (code + comments + blanks, à la `wc -l`; via `tokei`), counted over **git-tracked files only** (`git ls-files`) — so gitignored paths, build output, and sibling worktrees don't inflate it. Per-language icons, colours, and a size bar. |
 | **Docker** | Containers with health, CPU/mem, ports. Drill in for recent logs. |
-| **Ports** | Dev-endpoint health (up/down, latency, owning PID) — configured or auto-discovered. |
-| **Processes** | CPU / memory / uptime of `claude`, `node`, `python`, and other dev processes. |
+| **Ports** | Dev-endpoint health (up/down, latency, owning PID). Auto-discovers ports from your `docker-compose` / `Dockerfile` files, plus anything in config; falls back to live TCP listeners. |
+| **Tools** | Most-used tools across your recent sessions (Bash, Edit, Read, Grep, MCP tools…) over the last 7 days, with usage counts and bars — parsed from `tool_use` blocks in the transcripts. |
 | **Repo** | Whole-repo git health: branch, ahead/behind `origin/main`, stash count, dirty count, last fetch. |
 
 ## Install
@@ -85,9 +85,19 @@ The mouse works too — click a widget to focus it, click a row to select it, an
 
 ## Configuration
 
-`claude-cockpit` works with zero config. To pin the dev endpoints it watches (instead of auto-discovering listeners) or to monitor extra processes, drop a `claude-cockpit.toml` in the repo root, or `~/.config/claude-cockpit/config.toml`:
+`claude-cockpit` works with zero config. The **Ports** widget populates itself in this order:
+
+1. Any explicit `[[endpoints]]` from your config.
+2. **Auto-discovered docker ports** — it scans the repo (bounded depth, skipping `node_modules`/`target`/`vendor`/…) for `docker-compose.yml` / `compose.yaml` (published host ports, short *and* long syntax) and `Dockerfile`s (`EXPOSE`), labelling each by its service or directory.
+3. If both are empty, live local TCP listeners via `lsof`.
+
+To pin endpoints, set rate-limit caps, or turn docker discovery off, drop a `claude-cockpit.toml` in the repo root, or `~/.config/claude-cockpit/config.toml`:
 
 ```toml
+# Auto-discover endpoints from docker-compose / Dockerfile port mappings
+# in the repo, in addition to any [[endpoints]] below. Default: true.
+discover_endpoints = true
+
 # Dev endpoints to health-check in the Ports widget.
 [[endpoints]]
 label = "frontend"
@@ -98,9 +108,14 @@ label = "backend"
 host  = "127.0.0.1"   # optional, defaults to 127.0.0.1
 port  = 8080
 
-# Extra process-name substrings to include in the Processes widget
-# (on top of the built-in claude/node/python/cargo/… set).
-processes = ["uvicorn", "myservice"]
+# Rate widget caps. The Claude Code subscription limit is measured in PROMPTS
+# per rolling 5h, so set your `plan` for a true gauge (the plan can't be
+# detected locally — run `/status` in Claude Code if unsure). Anything omitted
+# auto-scales to your own busiest observed window.
+[rate_limit]
+plan           = "max5x"   # pro | max5x | max20x  → 5h prompt cap (~20/100/400)
+# prompts_5h   = 100       # explicit prompt cap (overrides `plan`)
+output_per_min = 100000    # output tokens/min (OTPM) — the tightest API limit
 ```
 
 See [`claude-cockpit.toml.example`](claude-cockpit.toml.example).
@@ -113,7 +128,8 @@ Everything is read locally and best-effort — a missing tool or file just yield
 - **Cost** — `~/.claude/projects/**/*.jsonl` (incrementally scanned, cached by mtime). Prices are a vendored Claude table, refreshed from [LiteLLM](https://github.com/BerriAI/litellm) when online and cached to `~/.claude/.cockpit-prices.json`.
 - **Git** — `git` CLI in the current repo
 - **Docker** — `docker ps` / `docker stats` / `docker logs`
-- **Ports / processes** — `lsof` + TCP connect; `sysinfo`
+- **Ports** — `docker-compose`/`Dockerfile` port mappings in the repo, then `lsof` + TCP connect
+- **Tools** — `tool_use` blocks in `~/.claude/projects/**/*.jsonl` (deduped by `message.id`)
 
 > **v1 is read-only.** The cockpit inspects; it never kills a job, stops a container, or touches your branches.
 

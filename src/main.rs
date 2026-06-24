@@ -7,6 +7,7 @@ mod layout;
 mod refresh;
 mod render;
 mod theme;
+mod trend;
 mod util;
 mod widget;
 

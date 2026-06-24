@@ -20,8 +20,11 @@ pub struct DashboardData {
     pub activity: Vec<(String, u32)>,
     pub containers: Vec<crate::collect::docker::Container>,
     pub endpoints: Vec<crate::collect::ports::Endpoint>,
-    pub procs: Vec<crate::collect::procs::Proc>,
+    pub tools: Vec<crate::collect::tools::ToolStat>,
     pub repo: Option<crate::collect::git::RepoHealth>,
+    /// Monotonic revision, bumped by every `publish_*`. The render loop redraws
+    /// only when this changes (or on input), so an idle dashboard costs no CPU.
+    pub rev: u64,
 }
 
 /// A scrollable in-app diff/log view. Scroll position lives in `App::detail_scroll`.
@@ -43,7 +46,6 @@ pub enum Detail {
     Activity,
     Code,
     Ports(usize),
-    Procs(usize),
     Repo,
 }
 

@@ -79,7 +79,6 @@ fn row_count(app: &App, kind: WidgetKind) -> usize {
         WidgetKind::Jobs => app.data.lock().unwrap().jobs.len(),
         WidgetKind::Docker => app.data.lock().unwrap().containers.len(),
         WidgetKind::Ports => app.data.lock().unwrap().endpoints.len(),
-        WidgetKind::Procs => app.data.lock().unwrap().procs.len(),
         _ => 0, // extended per phase as more widgets become selectable
     }
 }
@@ -91,7 +90,6 @@ fn is_table_widget(kind: WidgetKind) -> bool {
             | WidgetKind::Jobs
             | WidgetKind::Docker
             | WidgetKind::Ports
-            | WidgetKind::Procs
     )
 }
 
@@ -415,25 +413,13 @@ fn apply(app: &mut App, action: Action, root: &str) {
                         }
                     }
                 }
-                WidgetKind::Procs => {
-                    if let Some(idx) = app
-                        .ui
-                        .get(&WidgetKind::Procs)
-                        .and_then(|u| u.table.selected())
-                    {
-                        let n = app.data.lock().unwrap().procs.len();
-                        if idx < n {
-                            app.view = View::Detail(Detail::Procs(idx));
-                            app.detail_scroll = 0;
-                        }
-                    }
-                }
                 WidgetKind::Repo => {
                     if app.data.lock().unwrap().repo.is_some() {
                         app.view = View::Detail(Detail::Repo);
                         app.detail_scroll = 0;
                     }
                 }
+                WidgetKind::Procs => {} // Tools widget — not drillable
             },
             View::Detail(Detail::Worktree) => open_file_diff(app),
             View::Detail(Detail::Cost) => open_cost_model(app),
@@ -496,8 +482,17 @@ fn event_loop<B: ratatui::backend::Backend>(
     app: &mut App,
     root: &str,
 ) -> io::Result<()> {
+    // Redraw only when the data revision changes or input arrives, so an idle
+    // dashboard does no work. `u64::MAX` forces the first frame. Background
+    // refreshes bump `rev` every 2–10 s, which keeps time-based fields (ages,
+    // reset countdowns) ticking without a busy redraw loop.
+    let mut last_rev = u64::MAX;
     loop {
-        term.draw(|f| crate::render::dashboard::render(f, app))?;
+        let rev = { app.data.lock().unwrap().rev };
+        if rev != last_rev {
+            term.draw(|f| crate::render::dashboard::render(f, app))?;
+            last_rev = rev;
+        }
         if app.should_quit {
             break;
         }
@@ -508,7 +503,12 @@ fn event_loop<B: ratatui::backend::Backend>(
                     apply(app, a, root);
                 }
                 Event::Mouse(m) => handle_mouse(app, m, root),
+                Event::Resize(_, _) => last_rev = u64::MAX, // force a redraw next iteration
                 _ => {}
+            }
+            // Input may have changed view/scroll state — redraw regardless of rev.
+            if !app.should_quit {
+                term.draw(|f| crate::render::dashboard::render(f, app))?;
             }
         }
     }

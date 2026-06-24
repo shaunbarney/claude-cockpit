@@ -26,11 +26,11 @@ impl WidgetKind {
             WidgetKind::Worktrees => "Worktrees",
             WidgetKind::Jobs => "Jobs",
             WidgetKind::Cost => "Cost",
-            WidgetKind::Activity => "Activity",
+            WidgetKind::Activity => "Rate",
             WidgetKind::Code => "Code",
             WidgetKind::Docker => "Docker",
             WidgetKind::Ports => "Ports",
-            WidgetKind::Procs => "Processes",
+            WidgetKind::Procs => "Tools",
             WidgetKind::Repo => "Repo",
         }
     }

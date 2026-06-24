@@ -17,8 +17,8 @@ pub fn render(f: &mut Frame, area: Rect, loc: &[LocRow], theme: &Theme) {
     let header = Line::from(vec![
         Span::styled("files ", theme.dim_style()),
         Span::raw(thousands(sums.files as u64)),
-        Span::styled("   code ", theme.dim_style()),
-        Span::styled(thousands(sums.code as u64), Style::new().fg(theme.accent)),
+        Span::styled("   lines ", theme.dim_style()),
+        Span::styled(thousands(sums.lines as u64), Style::new().fg(theme.accent)),
         Span::styled("   languages ", theme.dim_style()),
         Span::raw(loc.len().to_string()),
     ]);
@@ -40,18 +40,18 @@ pub fn render(f: &mut Frame, area: Rect, loc: &[LocRow], theme: &Theme) {
         return;
     }
 
-    let total_code = sums.code.max(1);
+    let total_lines = sums.lines.max(1);
     let mut rows: Vec<Row> = loc
         .iter()
         .map(|r| {
-            let pct = r.code * 100 / total_code;
+            let pct = r.lines * 100 / total_lines;
             Row::new(vec![
                 Cell::from(Span::styled(
                     r.language.clone(),
                     Style::new().add_modifier(Modifier::BOLD),
                 )),
                 Cell::from(thousands(r.files as u64)),
-                Cell::from(thousands(r.code as u64)),
+                Cell::from(thousands(r.lines as u64)),
                 Cell::from(format!("{pct}%")),
             ])
         })
@@ -63,7 +63,7 @@ pub fn render(f: &mut Frame, area: Rect, loc: &[LocRow], theme: &Theme) {
                 Style::new().add_modifier(Modifier::BOLD),
             )),
             Cell::from(thousands(sums.files as u64)),
-            Cell::from(thousands(sums.code as u64)),
+            Cell::from(thousands(sums.lines as u64)),
             Cell::from("100%".to_string()),
         ])
         .style(Style::new().add_modifier(Modifier::BOLD)),
@@ -76,7 +76,7 @@ pub fn render(f: &mut Frame, area: Rect, loc: &[LocRow], theme: &Theme) {
         Constraint::Length(6),
     ];
     let table = Table::new(rows, widths)
-        .header(Row::new(["Language", "Files", "Code", "%"]).style(theme.dim_style()))
+        .header(Row::new(["Language", "Files", "Lines", "%"]).style(theme.dim_style()))
         .column_spacing(1)
         .block(bblock);
     f.render_widget(table, chunks[1]);
@@ -97,11 +97,13 @@ mod tests {
             LocRow {
                 language: "Rust".into(),
                 files: 10,
+                lines: 1100,
                 code: 900,
             },
             LocRow {
                 language: "TOML".into(),
                 files: 1,
+                lines: 120,
                 code: 100,
             },
         ];

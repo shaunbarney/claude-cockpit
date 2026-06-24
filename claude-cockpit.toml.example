@@ -2,8 +2,14 @@
 #
 # Copy to `claude-cockpit.toml` in your repo root, or to
 # `~/.config/claude-cockpit/config.toml`. With no config, the Ports widget
-# auto-discovers listening TCP ports and the Processes widget monitors a
+# auto-discovers ports from docker-compose / Dockerfile files in the repo
+# (falling back to live TCP listeners), and the Processes widget monitors a
 # built-in dev-tool set (claude, node, python, cargo, rustc, …).
+
+# Auto-discover endpoints from docker-compose / Dockerfile port mappings in the
+# repo, in addition to any [[endpoints]] below. Set to false to use only the
+# endpoints you list here. Default: true.
+discover_endpoints = true
 
 # Dev endpoints to health-check in the Ports widget.
 # Each gets a TCP connect + latency check and its owning PID via lsof.
@@ -20,6 +26,11 @@ port  = 8080
 label = "api"
 port  = 8000
 
-# Extra process-name substrings to include in the Processes widget,
-# on top of the built-in set (case-insensitive substring match).
-processes = ["uvicorn", "vite"]
+# Rate widget caps (all optional). The Claude Code subscription limit is
+# measured in PROMPTS per rolling 5-hour window, so set your `plan` for a true
+# gauge. The plan can't be detected locally — run `/status` in Claude Code if
+# unsure. Anything omitted auto-scales to your own busiest observed window.
+[rate_limit]
+plan           = "max5x"   # pro | max5x | max20x  -> 5h prompt cap (~20 / 100 / 400)
+# prompts_5h   = 100       # explicit 5h prompt cap (overrides `plan`)
+output_per_min = 100000    # output tokens per minute (OTPM) — tightest API limit

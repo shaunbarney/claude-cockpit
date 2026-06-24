@@ -12,13 +12,65 @@ fn default_host() -> String {
     "127.0.0.1".to_string()
 }
 
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct Config {
     #[serde(default)]
     pub endpoints: Vec<EndpointSpec>,
-    /// Extra process-name substrings to include in the Processes widget.
+    /// Auto-discover endpoints from docker-compose / Dockerfile port mappings
+    /// in the repo (in addition to any `[[endpoints]]`). Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub discover_endpoints: bool,
+    /// Optional rate-limit caps for the Rate widget gauges. Any field left
+    /// unset auto-scales to your own observed peak instead.
     #[serde(default)]
-    pub processes: Vec<String>,
+    pub rate_limit: RateLimit,
+}
+
+/// Known rate-limit caps. All optional — unset fields auto-scale to the
+/// busiest window observed in your local usage history.
+///
+/// The Claude Code subscription limit is measured in **prompts per rolling
+/// 5-hour window**, so set `plan` (or `prompts_5h`) for a true gauge. The API
+/// per-minute limit that bites first is **OTPM** (output tokens/min).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+pub struct RateLimit {
+    /// Subscription plan: `"pro"`, `"max5x"`, or `"max20x"` — sets the 5-hour
+    /// prompt cap (~20 / ~100 / ~400). Plan can't be detected locally; run
+    /// `/status` in Claude Code if unsure. Ignored if `prompts_5h` is set.
+    pub plan: Option<String>,
+    /// Explicit prompt cap for the rolling 5-hour window (overrides `plan`).
+    pub prompts_5h: Option<u64>,
+    /// Output tokens per minute (OTPM) cap.
+    pub output_per_min: Option<u64>,
+}
+
+/// Approximate 5-hour prompt cap and display label for a configured plan name.
+/// Figures are post-2026-05-06 doubling and approximate — Anthropic tunes them.
+pub fn plan_prompt_cap(plan: &str) -> Option<(u64, &'static str)> {
+    match plan
+        .to_lowercase()
+        .replace([' ', '_', '-'], "")
+        .as_str()
+    {
+        "pro" => Some((20, "Pro")),
+        "max5x" | "max5" | "max" => Some((100, "Max 5x")),
+        "max20x" | "max20" => Some((400, "Max 20x")),
+        _ => None,
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            endpoints: Vec::new(),
+            discover_endpoints: true,
+            rate_limit: RateLimit::default(),
+        }
+    }
 }
 
 /// Parse a TOML config body; returns default on any parse error.
@@ -71,5 +123,10 @@ mod tests {
     fn empty_is_default() {
         assert_eq!(parse(""), Config::default());
         assert_eq!(parse("garbage = ["), Config::default()); // parse error -> default
+    }
+    #[test]
+    fn discover_endpoints_defaults_on_and_is_toggleable() {
+        assert!(parse("").discover_endpoints); // default true
+        assert!(!parse("discover_endpoints = false").discover_endpoints);
     }
 }

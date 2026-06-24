@@ -1,4 +1,4 @@
-//! Full-screen Activity detail: cache efficiency + full prompt-cadence history.
+//! Full-screen Rate detail: cache efficiency + full prompt-cadence history.
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
@@ -59,7 +59,7 @@ pub fn render(
     ];
     let hblock = Block::default()
         .borders(Borders::ALL)
-        .title(" Activity ")
+        .title(" Rate ")
         .title_style(theme.title());
     f.render_widget(Paragraph::new(Text::from(header)).block(hblock), chunks[0]);
 
@@ -117,7 +117,7 @@ mod tests {
         term.draw(|f| render(f, f.area(), None, &cadence, &Theme::default(), 0))
             .unwrap();
         let s = text(term.backend().buffer());
-        assert!(s.contains("Activity"), "expected title");
+        assert!(s.contains("Rate"), "expected title");
         assert!(s.contains("2026-06-23"), "expected a day row");
         assert!(s.contains("busiest"), "expected busiest summary");
     }

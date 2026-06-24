@@ -92,12 +92,9 @@ pub fn render(
         .checked_div(total_tokens)
         .unwrap_or(0);
 
-    // Last up-to-14 by_day costs for the trend.
-    let cost_values: Vec<f64> = {
-        let days = &totals.by_day;
-        let start = days.len().saturating_sub(14);
-        days[start..].iter().map(|d| d.cost_usd).collect()
-    };
+    // Adaptive spend curve — hourly when usage spans ~one day, daily over weeks.
+    let cost_values = &totals.cost_trend.values;
+    let trend_label = totals.cost_trend.label.as_str();
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -150,13 +147,21 @@ pub fn render(
             theme,
         );
         f.render_widget(Paragraph::new(header), cuts[0]);
-        render_chart(f, cuts[1], &cost_values, theme);
+        render_chart(f, cuts[1], cost_values, trend_label, theme);
         render_model_table(f, cuts[2], &top_models, theme);
     }
 }
 
-fn render_chart(f: &mut Frame, area: Rect, costs: &[f64], theme: &Theme) {
+fn render_chart(f: &mut Frame, area: Rect, costs: &[f64], label: &str, theme: &Theme) {
     if costs.is_empty() {
+        return;
+    }
+    // A line needs two points. With only one bucket (all spend inside a single
+    // hour so far) draw the running figure instead of an empty chart — it still
+    // reflects live data and explains the time basis.
+    if costs.len() < 2 {
+        let v = costs.first().copied().unwrap_or(0.0);
+        hint(f, area, &format!("{label} · ${v:.2} so far"), theme);
         return;
     }
     let pts = crate::graph::points(costs);
@@ -173,7 +178,7 @@ fn render_chart(f: &mut Frame, area: Rect, costs: &[f64], theme: &Theme) {
         .x_axis(
             Axis::default()
                 .bounds([0.0, (n - 1.0).max(1.0)])
-                .labels(vec![Span::raw("")]),
+                .labels(vec![Span::styled(label.to_string(), theme.dim_style())]),
         )
         .y_axis(
             Axis::default()
@@ -182,6 +187,23 @@ fn render_chart(f: &mut Frame, area: Rect, costs: &[f64], theme: &Theme) {
         );
 
     f.render_widget(chart, area);
+}
+
+/// Render a dim, centered single-line hint in `area` (used when there is
+/// too little data to draw a meaningful chart).
+fn hint(f: &mut Frame, area: Rect, msg: &str, theme: &Theme) {
+    if area.height == 0 {
+        return;
+    }
+    let mid = area.height / 2;
+    let row = Rect {
+        y: area.y + mid,
+        height: 1,
+        ..area
+    };
+    let p = Paragraph::new(Line::from(Span::styled(msg.to_string(), theme.dim_style())))
+        .alignment(ratatui::layout::Alignment::Center);
+    f.render_widget(p, row);
 }
 
 fn render_model_table(f: &mut Frame, area: Rect, models: &[&ModelUsage], theme: &Theme) {

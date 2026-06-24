@@ -37,7 +37,7 @@ pub fn render(
 
     if endpoints.is_empty() {
         let msg = Span::styled(
-            "no endpoints — add [[endpoints]] to claude-cockpit.toml",
+            "no endpoints — none found in docker-compose/Dockerfiles; add [[endpoints]] to claude-cockpit.toml",
             theme.dim_style(),
         );
         f.render_widget(Paragraph::new(msg).block(block), area);
