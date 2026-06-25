@@ -34,9 +34,9 @@ Adding a column or color to one path does **not** affect the other.
 
 ### Threading & data flow
 The UI thread owns `App` and runs `event_loop` (250 ms poll). It **redraws only when `DashboardData.rev` changes or input arrives** — every `publish_*` bumps `rev`, so an idle dashboard does no rendering work (background refreshes bump `rev` every 2–10 s, which keeps ages/countdowns ticking). `refresh::spawn` starts three background threads that gather collectors off the UI thread and publish into a shared `Arc<Mutex<DashboardData>>`:
-- **slow (10 s)**: `gather_all` — worktrees, LOC, jobs, activity, docker, endpoints, repo health. `git fetch` is throttled to every 6th tick (~60 s), not every 10 s.
+- **slow (10 s)**: `gather_all` — worktrees, LOC, jobs, activity, docker, endpoints. `git fetch` is throttled to every 6th tick (~60 s), not every 10 s.
 - **fast (2 s)**: jobs only — the one widget that benefits from a tight cadence (live agent state). Endpoint discovery stays on the slow thread (it walks the repo for docker files).
-- **cost (10 s)**: usage scan (also computes `RateStats` for the Rate widget) + tool-use scan (for the Tools widget); refreshes LiteLLM prices once at startup.
+- **cost (10 s)**: usage scan (also computes `RateStats` for the Rate widget) + tool-use scan (Tools widget) + skill scan (Skills widget — `~/.claude/skills`/plugins + project, with usage from `Skill` tool-use blocks); refreshes LiteLLM prices once at startup.
 
 Flow: `collect::*` (IO-bound domain snapshot) → `refresh::publish_<x>` swaps **only its own slice** of `DashboardData` and bumps `rev` → `render::dashboard::render` **clones the slices out of the mutex, drops the guard, then renders**. Hold the lock as briefly as possible; never render while holding it. The manual `r` refresh (which calls `refresh_now`, i.e. `git fetch` + `gather_all`) is debounced with the `REFRESH_INFLIGHT` atomic.
 

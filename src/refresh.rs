@@ -67,14 +67,15 @@ pub fn publish_tools(data: &Arc<Mutex<DashboardData>>, list: Vec<crate::collect:
     d.rev += 1;
 }
 
-pub fn publish_repo(data: &Arc<Mutex<DashboardData>>, h: crate::collect::git::RepoHealth) {
+pub fn publish_skills(data: &Arc<Mutex<DashboardData>>, list: Vec<crate::collect::skills::Skill>) {
     let mut d = data.lock().unwrap();
-    d.repo = Some(h);
+    d.skills = list;
     d.rev += 1;
 }
 
 /// Gather everything except the network `git fetch` and publish it. This is the
 /// per-tick work of the slow loop; `git fetch` is throttled separately.
+/// (Skill usage is scanned on the cost thread, alongside the transcript walk.)
 fn gather_all(root: &str, data: &Arc<Mutex<DashboardData>>) {
     publish_worktrees(data, git::gather_worktrees(root));
     publish_loc(data, loc::loc_rows(root));
@@ -85,7 +86,6 @@ fn gather_all(root: &str, data: &Arc<Mutex<DashboardData>>) {
         data,
         crate::collect::ports::gather_endpoints(&crate::config::load(), root),
     );
-    publish_repo(data, git::repo_health(root));
 }
 
 /// One full gather + publish, including a `git fetch` (used at startup and on
@@ -140,19 +140,26 @@ pub fn spawn(root: String, data: Arc<Mutex<DashboardData>>) -> Arc<AtomicBool> {
         }
     });
 
-    // Cost thread: usage scan + tool-use scan every 10 s (100 × 100 ms ticks).
+    // Cost thread: usage + tool-use + skill scans every 10 s (100 × 100 ms ticks).
+    // All three walk the transcripts, so they share this thread's cadence.
     let s = stop.clone();
+    let root_cost = root.clone();
     thread::spawn(move || {
         // Best-effort live price refresh at startup; ignore result.
         let _ = crate::collect::pricing::fetch_litellm();
         let mut cache = crate::collect::usage::UsageCache::new();
         let mut tool_cache = crate::collect::tools::ToolCache::new();
+        let mut skill_cache = crate::collect::skills::SkillCache::new();
         while !s.load(Ordering::Relaxed) {
             publish_usage(&data, crate::collect::usage::scan_all(&mut cache));
             let now_ms = chrono::Utc::now().timestamp_millis();
             publish_tools(
                 &data,
                 crate::collect::tools::scan_tools(&mut tool_cache, now_ms, 7),
+            );
+            publish_skills(
+                &data,
+                crate::collect::skills::scan_skills(&mut skill_cache, &root_cost),
             );
             for _ in 0..100 {
                 if s.load(Ordering::Relaxed) {

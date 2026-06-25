@@ -79,6 +79,7 @@ fn row_count(app: &App, kind: WidgetKind) -> usize {
         WidgetKind::Jobs => app.data.lock().unwrap().jobs.len(),
         WidgetKind::Docker => app.data.lock().unwrap().containers.len(),
         WidgetKind::Ports => app.data.lock().unwrap().endpoints.len(),
+        WidgetKind::Repo => app.data.lock().unwrap().skills.len(),
         _ => 0, // extended per phase as more widgets become selectable
     }
 }
@@ -86,7 +87,11 @@ fn row_count(app: &App, kind: WidgetKind) -> usize {
 fn is_table_widget(kind: WidgetKind) -> bool {
     matches!(
         kind,
-        WidgetKind::Worktrees | WidgetKind::Jobs | WidgetKind::Docker | WidgetKind::Ports
+        WidgetKind::Worktrees
+            | WidgetKind::Jobs
+            | WidgetKind::Docker
+            | WidgetKind::Ports
+            | WidgetKind::Repo
     )
 }
 
@@ -411,9 +416,16 @@ fn apply(app: &mut App, action: Action, root: &str) {
                     }
                 }
                 WidgetKind::Repo => {
-                    if app.data.lock().unwrap().repo.is_some() {
-                        app.view = View::Detail(Detail::Repo);
-                        app.detail_scroll = 0;
+                    // The Repo slot hosts the Skills table — drill into a skill.
+                    if let Some(idx) = app
+                        .ui
+                        .get(&WidgetKind::Repo)
+                        .and_then(|u| u.table.selected())
+                    {
+                        if idx < app.data.lock().unwrap().skills.len() {
+                            app.view = View::Detail(Detail::Repo(idx));
+                            app.detail_scroll = 0;
+                        }
                     }
                 }
                 WidgetKind::Procs => {} // Tools widget — not drillable
@@ -634,22 +646,28 @@ mod tests {
     }
 
     #[test]
-    fn repo_drill_opens_detail() {
+    fn skills_drill_opens_detail() {
         let mut app = App::new(Theme::default());
         {
             let mut d = app.data.lock().unwrap();
-            d.repo = Some(crate::collect::git::RepoHealth {
-                branch: "main".into(),
-                ahead: 0,
-                behind: 0,
-                stash: 0,
-                dirty: 0,
-                last_fetch_secs: None,
+            d.skills.push(crate::collect::skills::Skill {
+                name: "deploy".into(),
+                description: "Ship it.".into(),
+                source: "personal".into(),
+                path: None,
+                uses: 3,
+                last_used: None,
             });
         }
-        app.focus = WidgetKind::Repo;
+        app.focus = WidgetKind::Repo; // the Repo slot hosts the Skills table
+                                      // Select the first row, then drill.
+        app.ui
+            .entry(WidgetKind::Repo)
+            .or_default()
+            .table
+            .select(Some(0));
         apply(&mut app, Action::Drill, ".");
-        assert!(matches!(app.view, View::Detail(Detail::Repo)));
+        assert!(matches!(app.view, View::Detail(Detail::Repo(0))));
         apply(&mut app, Action::Back, ".");
         assert!(matches!(app.view, View::Dashboard));
     }

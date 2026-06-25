@@ -6,7 +6,7 @@
 
 <p align="center">
   A live, read-only terminal dashboard for <strong>Claude Code</strong> and your dev environment —
-  git worktrees, background agents, token/USD cost, rate-limit proximity, Docker, dev endpoints, code stats, and tool usage in one responsive TUI.
+  git worktrees, background agents, token/USD cost, rate-limit proximity, Docker, dev endpoints, code stats, and tool &amp; skill usage in one responsive TUI.
 </p>
 
 <p align="center">
@@ -34,7 +34,7 @@ The layout reflows to your terminal: a multi-column grid on a wide screen, a sin
 | **Docker** | Containers with health, CPU/mem, ports. Drill in for recent logs. |
 | **Ports** | Dev-endpoint health (up/down, latency, owning PID). Auto-discovers ports from your `docker-compose` / `Dockerfile` files, plus anything in config; falls back to live TCP listeners. |
 | **Tools** | Most-used tools across your recent sessions (Bash, Edit, Read, Grep, MCP tools…) over the last 7 days, with usage counts and bars — parsed from `tool_use` blocks in the transcripts. |
-| **Repo** | Whole-repo git health: branch, ahead/behind `origin/main`, stash count, dirty count, last fetch. |
+| **Skills** | Your Claude Code skills — personal (`~/.claude/skills`), project, and plugin — ranked by how often you've actually invoked them, with source tag and a usage bar. Drill into a skill for its source, path, usage, and full description. |
 
 ## Install
 
@@ -131,10 +131,11 @@ Everything is read locally and best-effort — a missing tool or file just yield
 - **Cost** — `~/.claude/projects/**/*.jsonl` (incrementally scanned, cached by mtime). Prices are a vendored Claude table, refreshed from [LiteLLM](https://github.com/BerriAI/litellm) when online and cached to `~/.claude/.cockpit-prices.json`.
 - **Rate** — output-token usage from those same transcripts (OTPM) + prompt timestamps from `~/.claude/history.jsonl` (the rolling 5-hour prompt window)
 - **Code** — [`tokei`](https://github.com/XAMPPRocky/tokei) over `git ls-files` (git-tracked files only)
-- **Git / Repo / Worktrees** — `git` CLI in the current repo
+- **Git / Worktrees** — `git` CLI in the current repo
 - **Docker** — `docker ps` / `docker stats` / `docker logs`
 - **Ports** — `docker-compose`/`Dockerfile` port mappings in the repo, then `lsof` + TCP connect
 - **Tools** — `tool_use` blocks in `~/.claude/projects/**/*.jsonl` (deduped by `message.id`)
+- **Skills** — `SKILL.md` files in `~/.claude/skills`, `<repo>/.claude/skills`, and `~/.claude/plugins/**/skills`; usage from `Skill` tool-use blocks in the transcripts
 
 > **v1 is read-only.** The cockpit inspects; it never kills a job, stops a container, or touches your branches.
 

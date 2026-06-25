@@ -31,7 +31,7 @@ impl WidgetKind {
             WidgetKind::Docker => "Docker",
             WidgetKind::Ports => "Ports",
             WidgetKind::Procs => "Tools",
-            WidgetKind::Repo => "Repo",
+            WidgetKind::Repo => "Skills",
         }
     }
     pub fn next(self) -> WidgetKind {

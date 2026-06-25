@@ -21,7 +21,7 @@ pub struct DashboardData {
     pub containers: Vec<crate::collect::docker::Container>,
     pub endpoints: Vec<crate::collect::ports::Endpoint>,
     pub tools: Vec<crate::collect::tools::ToolStat>,
-    pub repo: Option<crate::collect::git::RepoHealth>,
+    pub skills: Vec<crate::collect::skills::Skill>,
     /// Monotonic revision, bumped by every `publish_*`. The render loop redraws
     /// only when this changes (or on input), so an idle dashboard costs no CPU.
     pub rev: u64,
@@ -46,7 +46,7 @@ pub enum Detail {
     Activity,
     Code,
     Ports(usize),
-    Repo,
+    Repo(usize), // the Repo slot now hosts the Skills widget; carries the skill index
 }
 
 /// The current screen.

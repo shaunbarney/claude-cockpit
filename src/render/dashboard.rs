@@ -84,7 +84,7 @@ fn draw_content(f: &mut Frame, app: &mut App) {
         Activity,
         Code,
         Ports(usize),
-        Repo,
+        Repo(usize),
         None,
     }
     let route = match &app.view {
@@ -97,7 +97,7 @@ fn draw_content(f: &mut Frame, app: &mut App) {
         View::Detail(Detail::Activity) => DetailRoute::Activity,
         View::Detail(Detail::Code) => DetailRoute::Code,
         View::Detail(Detail::Ports(i)) => DetailRoute::Ports(*i),
-        View::Detail(Detail::Repo) => DetailRoute::Repo,
+        View::Detail(Detail::Repo(i)) => DetailRoute::Repo(*i),
         _ => DetailRoute::None,
     };
 
@@ -292,11 +292,17 @@ fn draw_content(f: &mut Frame, app: &mut App) {
             app.rects = FrameRects::default();
             return;
         }
-        DetailRoute::Repo => {
+        DetailRoute::Repo(idx) => {
             let outer = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
-            let repo = { app.data.lock().unwrap().repo.clone() };
-            crate::render::detail::repo::render(f, outer[0], repo.as_ref(), &app.theme);
-            let line = Line::from("  Esc back · q quit");
+            let skill = { app.data.lock().unwrap().skills.get(idx).cloned() };
+            crate::render::detail::skills::render(
+                f,
+                outer[0],
+                skill.as_ref(),
+                &app.theme,
+                app.detail_scroll,
+            );
+            let line = Line::from("  Esc back · ↑/↓ scroll · q quit");
             f.render_widget(Paragraph::new(line).style(app.theme.dim_style()), outer[1]);
             app.rects = FrameRects::default();
             return;
@@ -331,7 +337,7 @@ fn draw_content(f: &mut Frame, app: &mut App) {
     let containers = data.containers.clone();
     let endpoints = data.endpoints.clone();
     let tools = data.tools.clone();
-    let repo = data.repo.clone();
+    let skills = data.skills.clone();
     drop(data);
 
     for (kind, rect) in &placed {
@@ -410,7 +416,16 @@ fn draw_content(f: &mut Frame, app: &mut App) {
                 widgets::tools::render(f, *rect, &tools, &theme, focused, b);
             }
             WidgetKind::Repo => {
-                widgets::repo::render(f, *rect, repo.as_ref(), &theme, focused);
+                let offset = {
+                    let st = app.ui.entry(WidgetKind::Repo).or_default();
+                    widgets::skills::render(f, *rect, &skills, &theme, focused, b, &mut st.table);
+                    st.table.offset()
+                };
+                if focused {
+                    app.rects.table_inner =
+                        Some(Block::default().borders(Borders::ALL).inner(*rect));
+                    app.rects.table_offset = offset;
+                }
             }
         }
     }
