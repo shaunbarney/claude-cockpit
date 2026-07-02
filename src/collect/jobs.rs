@@ -115,6 +115,40 @@ pub fn gather_jobs() -> Vec<Job> {
     out
 }
 
+/// Append a synthetic "no agent" job for every worktree that no job owns, so the
+/// Jobs pane reflects *all* the worktrees on disk — not just the ones a live
+/// agent recorded. Matching is by worktree path (trailing slash normalised).
+pub fn merge_orphan_worktrees(
+    mut jobs: Vec<Job>,
+    worktrees: &[crate::collect::git::Worktree],
+) -> Vec<Job> {
+    let norm = |p: &str| p.trim_end_matches('/').to_string();
+    let owned: std::collections::HashSet<String> = jobs
+        .iter()
+        .filter_map(|j| j.worktree_path.as_deref().map(norm))
+        .collect();
+    for wt in worktrees {
+        if owned.contains(&norm(&wt.path)) {
+            continue;
+        }
+        jobs.push(Job {
+            id: format!("worktree:{}", wt.path),
+            name: wt.name.clone(),
+            state: "no agent".into(),
+            tempo: String::new(),
+            intent: String::new(),
+            tasks: 0,
+            queued: 0,
+            cwd: wt.path.clone(),
+            worktree_path: Some(wt.path.clone()),
+            worktree_branch: Some(wt.branch.clone()),
+            created_at: None,
+            updated_at: None,
+        });
+    }
+    jobs
+}
+
 /// Parse a `timeline.jsonl` body, skipping unparseable lines.
 pub fn parse_timeline(s: &str) -> Vec<JobEvent> {
     s.lines()
@@ -162,6 +196,37 @@ pub fn read_timeline(job_id: &str, tail: usize) -> Vec<JobEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::collect::git::Worktree;
+
+    fn wt(name: &str, path: &str, branch: &str) -> Worktree {
+        Worktree {
+            name: name.into(),
+            path: path.into(),
+            branch: branch.into(),
+            ahead: 0,
+            dirty: 0,
+            committed: (0, 0),
+            uncommitted: (0, 0),
+            age: String::new(),
+        }
+    }
+
+    #[test]
+    fn appends_orphan_worktrees_only() {
+        let owned = parse_state("id", SAMPLE).unwrap(); // owns /repo/.claude/worktrees/x
+        let worktrees = vec![
+            wt("x", "/repo/.claude/worktrees/x", "worktree-x"), // owned → skipped
+            wt("y", "/repo/.claude/worktrees/y", "feature/y"),  // orphan → appended
+        ];
+        let merged = merge_orphan_worktrees(vec![owned], &worktrees);
+        assert_eq!(merged.len(), 2);
+        let orphan = merged.iter().find(|j| j.name == "y").unwrap();
+        assert_eq!(orphan.state, "no agent");
+        assert_eq!(orphan.worktree_branch.as_deref(), Some("feature/y"));
+        // The owned worktree must not be duplicated as an orphan.
+        assert_eq!(merged.iter().filter(|j| j.name == "x").count(), 0);
+        assert!(merged.iter().any(|j| j.name == "Governour"));
+    }
 
     const SAMPLE: &str = r#"{"state":"working","tempo":"active","inFlight":{"tasks":2,"queued":1},
         "intent":"do the thing","name":"Governour","cwd":"/repo",

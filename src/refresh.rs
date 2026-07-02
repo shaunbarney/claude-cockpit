@@ -77,9 +77,14 @@ pub fn publish_skills(data: &Arc<Mutex<DashboardData>>, list: Vec<crate::collect
 /// per-tick work of the slow loop; `git fetch` is throttled separately.
 /// (Skill usage is scanned on the cost thread, alongside the transcript walk.)
 fn gather_all(root: &str, data: &Arc<Mutex<DashboardData>>) {
-    publish_worktrees(data, git::gather_worktrees(root));
+    let wts = git::gather_worktrees(root);
+    // Jobs list includes a synthetic "no agent" row for each worktree no job owns.
+    publish_jobs(
+        data,
+        jobs::merge_orphan_worktrees(jobs::gather_jobs(), &wts),
+    );
+    publish_worktrees(data, wts);
     publish_loc(data, loc::loc_rows(root));
-    publish_jobs(data, jobs::gather_jobs());
     publish_activity(data, crate::collect::activity::read_history());
     publish_containers(data, crate::collect::docker::gather_containers());
     publish_endpoints(
@@ -130,7 +135,13 @@ pub fn spawn(root: String, data: Arc<Mutex<DashboardData>>) -> Arc<AtomicBool> {
     let data3 = data.clone();
     thread::spawn(move || {
         while !s.load(Ordering::Relaxed) {
-            publish_jobs(&data3, jobs::gather_jobs());
+            // Merge against the last-published worktrees (refreshed by the slow
+            // thread) so orphan-worktree rows stay present between slow ticks.
+            let wts = { data3.lock().unwrap().worktrees.clone() };
+            publish_jobs(
+                &data3,
+                jobs::merge_orphan_worktrees(jobs::gather_jobs(), &wts),
+            );
             for _ in 0..20 {
                 if s.load(Ordering::Relaxed) {
                     break;

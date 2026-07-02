@@ -27,7 +27,7 @@ The layout reflows to your terminal: a multi-column grid on a wide screen, a sin
 | Widget | What it shows |
 |--------|---------------|
 | **Worktrees** | Every git worktree ranked ahead → dirty → clean, with committed/uncommitted churn and age. Drill in for the owning Claude job, changed files, an in-app diff, recent commits, and a merge-readiness verdict. |
-| **Jobs** | Live Claude Code background agents from `~/.claude/jobs/*/state.json` — state, tempo, in-flight tasks, intent, age, stuck-detection. Drill in for the job's `timeline.jsonl` event feed. |
+| **Jobs** | Live Claude Code background agents from `~/.claude/jobs/*/state.json` — state, tempo, in-flight tasks, intent, age, stuck-detection. Worktrees with no owning job show as `no agent` rows, so every worktree is accounted for. Drill in for the job's `timeline.jsonl` event feed. |
 | **Cost** | Total / today / per-model token totals and **USD cost** from your transcripts (deduped by `message.id`), with a braille spend-trend and cache-hit %. Drill in for a per-day and per-model breakdown. |
 | **Rate** | Rate-limit proximity: a rolling **5-hour prompt** gauge (the unit the Claude Code subscription limit actually uses) vs your plan cap, an **OTPM** output-tokens-per-minute burn gauge, a reset countdown, and a token-rate sparkline. Set `plan` in config for a true %; otherwise it auto-scales to your busiest observed window. |
 | **Code** | Total lines by language (code + comments + blanks, à la `wc -l`; via `tokei`), counted over **git-tracked files only** (`git ls-files`) — so gitignored paths, build output, and sibling worktrees don't inflate it. Per-language icons, colours, and a size bar. |
