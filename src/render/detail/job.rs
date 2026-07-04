@@ -221,8 +221,8 @@ mod tests {
             "expected 'Worktree:' label in header"
         );
         assert!(
-            s.contains("feat/demo"),
-            "expected worktree branch value in header"
+            s.contains("governour-cockpit"),
+            "expected worktree folder name in header (folder wins over branch)"
         );
         assert!(
             s.contains("starting build"),

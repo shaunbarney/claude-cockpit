@@ -115,20 +115,73 @@ pub fn gather_jobs() -> Vec<Job> {
     out
 }
 
-/// Append a synthetic "no agent" job for every worktree that no job owns, so the
-/// Jobs pane reflects *all* the worktrees on disk — not just the ones a live
-/// agent recorded. Matching is by worktree path (trailing slash normalised).
+/// Lowercased alphanumerics only — so "RemoteLogging" and "remote-logging-mcp"
+/// can be compared by containment.
+fn norm_name(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// Make every worktree visible in the Jobs pane.
+///
+/// For each worktree no job's `worktreePath` owns, first try to attribute it to
+/// an existing agent by name: a job with no worktree of its own whose
+/// normalised name is contained in the worktree's folder/branch name (e.g.
+/// agent `RemoteLogging` ↔ worktree `remote-logging-mcp`). Only an
+/// **unambiguous** match links (one candidate job for the worktree, and that
+/// job matches no other orphan). Anything still unowned gets a synthetic
+/// "no agent" row so the pane reflects all worktrees on disk.
 pub fn merge_orphan_worktrees(
     mut jobs: Vec<Job>,
     worktrees: &[crate::collect::git::Worktree],
 ) -> Vec<Job> {
-    let norm = |p: &str| p.trim_end_matches('/').to_string();
+    let norm_path = |p: &str| p.trim_end_matches('/').to_string();
     let owned: std::collections::HashSet<String> = jobs
         .iter()
-        .filter_map(|j| j.worktree_path.as_deref().map(norm))
+        .filter_map(|j| j.worktree_path.as_deref().map(norm_path))
         .collect();
-    for wt in worktrees {
-        if owned.contains(&norm(&wt.path)) {
+    let orphans: Vec<&crate::collect::git::Worktree> = worktrees
+        .iter()
+        .filter(|wt| !owned.contains(&norm_path(&wt.path)))
+        .collect();
+
+    // Candidate (job index, orphan index) name matches.
+    let job_matches = |j: &Job, wt: &crate::collect::git::Worktree| {
+        if j.worktree_path.is_some() {
+            return false;
+        }
+        let jn = norm_name(&j.name);
+        !jn.is_empty() && (norm_name(&wt.name).contains(&jn) || norm_name(&wt.branch).contains(&jn))
+    };
+    let mut attached: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    for (wi, wt) in orphans.iter().enumerate() {
+        let candidates: Vec<usize> = jobs
+            .iter()
+            .enumerate()
+            .filter(|(_, j)| job_matches(j, wt))
+            .map(|(i, _)| i)
+            .collect();
+        // Link only when exactly one job matches this worktree AND that job
+        // doesn't also match another orphan (ambiguity → leave both unlinked).
+        if let [ji] = candidates.as_slice() {
+            let unique = orphans
+                .iter()
+                .enumerate()
+                .filter(|(oi, o)| *oi != wi && job_matches(&jobs[*ji], o))
+                .count()
+                == 0;
+            if unique {
+                jobs[*ji].worktree_path = Some(wt.path.clone());
+                jobs[*ji].worktree_branch = Some(wt.branch.clone());
+                attached.insert(wi);
+            }
+        }
+    }
+
+    for (wi, wt) in orphans.iter().enumerate() {
+        if attached.contains(&wi) {
             continue;
         }
         jobs.push(Job {
@@ -226,6 +279,61 @@ mod tests {
         // The owned worktree must not be duplicated as an orphan.
         assert_eq!(merged.iter().filter(|j| j.name == "x").count(), 0);
         assert!(merged.iter().any(|j| j.name == "Governour"));
+    }
+
+    fn bare_job(name: &str) -> Job {
+        Job {
+            id: name.to_lowercase(),
+            name: name.into(),
+            state: "blocked".into(),
+            tempo: String::new(),
+            intent: String::new(),
+            tasks: 0,
+            queued: 0,
+            cwd: String::new(),
+            worktree_path: None,
+            worktree_branch: None,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn attributes_orphan_worktree_to_agent_by_name() {
+        // Agent "RemoteLogging" has no worktree; worktree "remote-logging-mcp"
+        // has no owner → they should link, with NO synthetic row created.
+        let jobs = vec![bare_job("RemoteLogging"), bare_job("Dotfiles")];
+        let worktrees = vec![
+            wt(
+                "remote-logging-mcp",
+                "/r/.claude/worktrees/remote-logging-mcp",
+                "feature/logs",
+            ),
+            wt(
+                "admin-backoffice",
+                "/r/.claude/worktrees/admin-backoffice",
+                "feature/admin",
+            ),
+        ];
+        let merged = merge_orphan_worktrees(jobs, &worktrees);
+
+        let rl = merged.iter().find(|j| j.name == "RemoteLogging").unwrap();
+        assert_eq!(
+            rl.worktree_path.as_deref(),
+            Some("/r/.claude/worktrees/remote-logging-mcp")
+        );
+        assert_eq!(rl.state, "blocked"); // keeps its real state
+                                         // No synthetic row for the attributed worktree…
+        assert!(!merged.iter().any(|j| j.name == "remote-logging-mcp"));
+        // …but the truly unmatched one still gets its 'no agent' row.
+        let orphan = merged
+            .iter()
+            .find(|j| j.name == "admin-backoffice")
+            .unwrap();
+        assert_eq!(orphan.state, "no agent");
+        // Dotfiles matched nothing and stays worktree-less.
+        let dot = merged.iter().find(|j| j.name == "Dotfiles").unwrap();
+        assert!(dot.worktree_path.is_none());
     }
 
     const SAMPLE: &str = r#"{"state":"working","tempo":"active","inFlight":{"tasks":2,"queued":1},
