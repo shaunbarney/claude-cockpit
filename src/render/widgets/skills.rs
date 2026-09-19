@@ -4,9 +4,10 @@
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
 use ratatui::Frame;
 
+use super::TableCtx;
 use crate::collect::skills::Skill;
 use crate::layout::Band;
 use crate::theme::Theme;
@@ -40,11 +41,26 @@ pub fn render(
     f: &mut Frame,
     area: Rect,
     skills: &[Skill],
-    theme: &Theme,
-    focused: bool,
-    band: Band,
+    ctx: TableCtx<'_>,
     state: &mut TableState,
 ) {
+    let TableCtx {
+        theme,
+        focused,
+        band,
+        flash,
+        empty,
+    } = ctx;
+    if skills.is_empty() {
+        let ctx = TableCtx {
+            theme,
+            focused,
+            band,
+            flash,
+            empty,
+        };
+        return super::empty_state(f, area, " Skills ", empty, &ctx);
+    }
     let border_style = if focused {
         Style::new().fg(theme.focus_border)
     } else {
@@ -54,15 +70,6 @@ pub fn render(
         .borders(Borders::ALL)
         .title(" Skills ")
         .border_style(border_style);
-
-    if skills.is_empty() {
-        let msg = Span::styled(
-            "no skills found — add one in ~/.claude/skills/<name>/SKILL.md",
-            theme.dim_style(),
-        );
-        f.render_widget(Paragraph::new(msg).block(block), area);
-        return;
-    }
 
     let max = skills.iter().map(|s| s.uses).max().unwrap_or(1).max(1) as f64;
     let compact = band == Band::Compact;
@@ -105,6 +112,7 @@ pub fn render(
             }
         })
         .collect();
+    let rows = super::flashed(rows, flash);
 
     let header = if compact {
         Row::new(["Skill", "Uses"])
@@ -159,9 +167,13 @@ mod tests {
                     height: 10,
                 },
                 &skills,
-                &Theme::default(),
-                true,
-                Band::Wide,
+                super::TableCtx {
+                    theme: &Theme::default(),
+                    focused: true,
+                    band: Band::Wide,
+                    flash: &[],
+                    empty: "nothing here",
+                },
                 &mut state,
             );
         })

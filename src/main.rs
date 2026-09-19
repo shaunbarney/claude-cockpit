@@ -1,4 +1,4 @@
-use claude_cockpit::{collect, event, render};
+use claude_cockpit::{collect, render, runloop};
 
 use clap::Parser;
 use render::Mode;
@@ -38,7 +38,7 @@ fn main() {
     // Default (no one-shot flag) launches the interactive cockpit.
     let wants_oneshot = cli.worktrees || cli.code || cli.watch;
     if cli.tui || !wants_oneshot {
-        if let Err(e) = event::run(&root) {
+        if let Err(e) = runloop::run(&root) {
             eprintln!("claude-cockpit: error: {e}");
             std::process::exit(1);
         }

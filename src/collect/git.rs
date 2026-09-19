@@ -38,6 +38,28 @@ pub(crate) fn git(args: &[&str]) -> String {
 }
 
 /// Repository top-level directory.
+/// Identity of the repo the cockpit is pointed at, for the header bar.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RepoInfo {
+    pub name: String,
+    pub branch: String,
+}
+
+/// Read the repo's folder name and checked-out branch.
+///
+/// Best-effort like every other collector: outside a repo, or with a detached
+/// HEAD, the fields come back empty and the header simply shows less.
+pub fn repo_info(root: &str) -> RepoInfo {
+    let name = std::path::Path::new(root)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let branch = git(&["-C", root, "rev-parse", "--abbrev-ref", "HEAD"])
+        .trim()
+        .to_string();
+    RepoInfo { name, branch }
+}
+
 pub fn repo_root() -> String {
     git(&["rev-parse", "--show-toplevel"]).trim().to_string()
 }

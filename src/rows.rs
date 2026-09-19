@@ -256,7 +256,7 @@ pub fn prepare<T: TableRow>(
                 }
             });
         }
-        _ if !filter.is_empty() => scored.sort_by(|a, b| b.1.cmp(&a.1)),
+        _ if !filter.is_empty() => scored.sort_by_key(|&(_, score)| std::cmp::Reverse(score)),
         _ => {}
     }
 

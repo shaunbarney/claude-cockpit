@@ -10,6 +10,12 @@ use crate::collect::git::{self, Worktree};
 use crate::collect::jobs::{self, Job};
 use crate::collect::loc::{self, LocRow};
 
+pub fn publish_repo(data: &Arc<Mutex<DashboardData>>, info: crate::collect::git::RepoInfo) {
+    let mut d = data.lock().unwrap();
+    d.repo = info;
+    d.rev += 1;
+}
+
 pub fn publish_worktrees(data: &Arc<Mutex<DashboardData>>, wts: Vec<Worktree>) {
     let mut d = data.lock().unwrap();
     d.worktrees = wts;
@@ -77,6 +83,7 @@ pub fn publish_skills(data: &Arc<Mutex<DashboardData>>, list: Vec<crate::collect
 /// per-tick work of the slow loop; `git fetch` is throttled separately.
 /// (Skill usage is scanned on the cost thread, alongside the transcript walk.)
 fn gather_all(root: &str, data: &Arc<Mutex<DashboardData>>) {
+    publish_repo(data, git::repo_info(root));
     let wts = git::gather_worktrees(root);
     // Jobs list includes a synthetic "no agent" row for each worktree no job owns.
     publish_jobs(

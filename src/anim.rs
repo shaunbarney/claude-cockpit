@@ -102,6 +102,11 @@ impl Flashes {
     pub fn len(&self) -> usize {
         self.seen.len()
     }
+
+    /// True when nothing is being tracked at all.
+    pub fn is_empty(&self) -> bool {
+        self.seen.is_empty()
+    }
 }
 
 #[cfg(test)]

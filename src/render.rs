@@ -2,6 +2,9 @@
 pub mod detail;
 
 pub mod dashboard;
+pub mod footer;
+pub mod header;
+pub mod overlay;
 pub mod widgets;
 
 use comfy_table::Color;

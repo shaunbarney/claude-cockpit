@@ -16,6 +16,8 @@ use crate::widget::WidgetKind;
 /// All cached datasets shown on the dashboard. Extended per phase.
 #[derive(Default)]
 pub struct DashboardData {
+    /// Repo name and branch shown in the header bar.
+    pub repo: crate::collect::git::RepoInfo,
     pub worktrees: Vec<Worktree>,
     pub loc: Vec<LocRow>,
     pub jobs: Vec<crate::collect::jobs::Job>,
@@ -370,14 +372,26 @@ mod tests {
     fn first_sync_seeds_without_flashing() {
         let mut app = app_with_jobs();
         app.sync();
-        assert_eq!(app.flashes.intensity(&App::flash_key(WidgetKind::Jobs, "1")), 0.0);
+        assert_eq!(
+            app.flashes
+                .intensity(&App::flash_key(WidgetKind::Jobs, "1")),
+            0.0
+        );
 
         // A later change does flash.
         app.data.lock().unwrap().jobs[0].state = "blocked".into();
         app.sync();
-        assert!(app.flashes.intensity(&App::flash_key(WidgetKind::Jobs, "1")) > 0.0);
+        assert!(
+            app.flashes
+                .intensity(&App::flash_key(WidgetKind::Jobs, "1"))
+                > 0.0
+        );
         // Untouched rows stay quiet.
-        assert_eq!(app.flashes.intensity(&App::flash_key(WidgetKind::Jobs, "2")), 0.0);
+        assert_eq!(
+            app.flashes
+                .intensity(&App::flash_key(WidgetKind::Jobs, "2")),
+            0.0
+        );
     }
 
     #[test]

@@ -285,8 +285,14 @@ mod tests {
         assert_eq!(t.ok, Color::Reset);
         assert_eq!(t.err, Color::Reset);
         // Colour collapses; glyphs must not.
-        let glyphs = [Level::Ok, Level::Warn, Level::Err, Level::Idle, Level::Active]
-            .map(|l| l.glyph());
+        let glyphs = [
+            Level::Ok,
+            Level::Warn,
+            Level::Err,
+            Level::Idle,
+            Level::Active,
+        ]
+        .map(|l| l.glyph());
         let mut uniq = glyphs.to_vec();
         uniq.sort_unstable();
         uniq.dedup();
@@ -331,10 +337,7 @@ mod tests {
     #[test]
     fn focus_border_is_emphasised() {
         let t = Theme::new(Depth::True, None);
-        assert!(t
-            .border_style(true)
-            .add_modifier
-            .contains(Modifier::BOLD));
+        assert!(t.border_style(true).add_modifier.contains(Modifier::BOLD));
         assert_eq!(t.border_style(false).fg, Some(t.dim));
     }
 }

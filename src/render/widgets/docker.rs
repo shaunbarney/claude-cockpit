@@ -6,6 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 use ratatui::Frame;
 
+use super::TableCtx;
 use crate::collect::docker::Container;
 use crate::layout::Band;
 use crate::theme::Theme;
@@ -44,16 +45,30 @@ fn health_text(c: &Container) -> &str {
 ///
 /// Columns (Wide/Medium): `● | Name | Health | CPU% | Mem | Ports`
 /// Compact band: `● | Name | CPU% | Mem`
-#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     area: Rect,
     containers: &[Container],
-    theme: &Theme,
-    focused: bool,
-    band: Band,
+    ctx: TableCtx<'_>,
     state: &mut TableState,
 ) {
+    let TableCtx {
+        theme,
+        focused,
+        band,
+        flash,
+        empty,
+    } = ctx;
+    if containers.is_empty() {
+        let ctx = TableCtx {
+            theme,
+            focused,
+            band,
+            flash,
+            empty,
+        };
+        return super::empty_state(f, area, " Docker ", empty, &ctx);
+    }
     let border_style = if focused {
         Style::new().fg(theme.focus_border)
     } else {
@@ -141,6 +156,7 @@ pub fn render(
             }
         })
         .collect();
+    let body = super::flashed(body, flash);
 
     let table = Table::new(body, widths)
         .header(header)
@@ -192,9 +208,13 @@ mod tests {
                     height: 12,
                 },
                 &containers,
-                &theme,
-                true,
-                crate::layout::Band::Wide,
+                super::TableCtx {
+                    theme: &theme,
+                    focused: true,
+                    band: crate::layout::Band::Wide,
+                    flash: &[],
+                    empty: "nothing here",
+                },
                 &mut st,
             )
         })
@@ -222,17 +242,24 @@ mod tests {
                     height: 10,
                 },
                 &[],
-                &theme,
-                false,
-                crate::layout::Band::Wide,
+                super::TableCtx {
+                    theme: &theme,
+                    focused: false,
+                    band: crate::layout::Band::Wide,
+                    flash: &[],
+                    empty: "no containers — is the docker daemon up?",
+                },
                 &mut st,
             )
         })
         .unwrap();
         let s = buffer_text(term.backend().buffer());
         assert!(s.contains("Docker"), "expected 'Docker' block title");
+        // The caller supplies the message, so it can say "no matches" under a
+        // filter and "daemon down" otherwise; the widget must render it.
         assert!(
-            s.to_lowercase().contains("no containers") || s.to_lowercase().contains("not running")
+            s.contains("no containers"),
+            "expected the caller's empty message"
         );
     }
 }

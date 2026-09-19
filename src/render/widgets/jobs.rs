@@ -6,9 +6,9 @@ use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
 use ratatui::Frame;
 
+use super::TableCtx;
 use crate::collect::jobs::Job;
 use crate::layout::Band;
-use crate::theme::Theme;
 use crate::util::{human_duration, worktree_label};
 
 /// Truncate `s` to at most `max` chars, appending `…` if it was cut.
@@ -24,17 +24,31 @@ fn truncate(s: &str, max: usize) -> String {
 ///
 /// Columns (wide/medium): `● | Name | State | Tasks | Worktree | Age`
 /// Compact band: drops `Tasks` and truncates Worktree column.
-#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     area: Rect,
     jobs: &[Job],
-    theme: &Theme,
-    focused: bool,
-    band: Band,
+    ctx: TableCtx<'_>,
     state: &mut TableState,
     now: i64,
 ) {
+    let TableCtx {
+        theme,
+        focused,
+        band,
+        flash,
+        empty,
+    } = ctx;
+    if jobs.is_empty() {
+        let ctx = TableCtx {
+            theme,
+            focused,
+            band,
+            flash,
+            empty,
+        };
+        return super::empty_state(f, area, " Jobs ", empty, &ctx);
+    }
     let border_style = if focused {
         Style::new().fg(theme.focus_border)
     } else {
@@ -149,6 +163,7 @@ pub fn render(
             Row::new(cells).style(row_style)
         })
         .collect();
+    let body = super::flashed(body, flash);
 
     let table = Table::new(body, widths)
         .header(header)
@@ -203,9 +218,13 @@ mod tests {
                     height: 12,
                 },
                 &jobs,
-                &theme,
-                true,
-                crate::layout::Band::Wide,
+                super::TableCtx {
+                    theme: &theme,
+                    focused: true,
+                    band: crate::layout::Band::Wide,
+                    flash: &[],
+                    empty: "nothing here",
+                },
                 &mut st,
                 200,
             )

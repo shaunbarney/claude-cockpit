@@ -139,7 +139,10 @@ mod tests {
         let mut fz = Fuzzy::default();
         assert_eq!(total(WidgetKind::Jobs, &d), 3);
         assert_eq!(visible(WidgetKind::Jobs, &d, "", None, &mut fz).len(), 3);
-        assert_eq!(visible(WidgetKind::Jobs, &d, "beta", None, &mut fz), vec![1]);
+        assert_eq!(
+            visible(WidgetKind::Jobs, &d, "beta", None, &mut fz),
+            vec![1]
+        );
         // Filtering also searches state, not just name.
         assert_eq!(
             visible(WidgetKind::Jobs, &d, "blocked", None, &mut fz),

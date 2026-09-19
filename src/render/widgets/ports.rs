@@ -6,24 +6,38 @@ use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 use ratatui::Frame;
 
+use super::TableCtx;
 use crate::collect::ports::Endpoint;
 use crate::layout::Band;
-use crate::theme::Theme;
 
 /// Render the Ports table into `area`.
 ///
 /// Columns (wide): `● | Service | Addr | Latency | PID`
 /// Compact band: drops `PID`.
-#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     area: Rect,
     endpoints: &[Endpoint],
-    theme: &Theme,
-    focused: bool,
-    band: Band,
+    ctx: TableCtx<'_>,
     state: &mut TableState,
 ) {
+    let TableCtx {
+        theme,
+        focused,
+        band,
+        flash,
+        empty,
+    } = ctx;
+    if endpoints.is_empty() {
+        let ctx = TableCtx {
+            theme,
+            focused,
+            band,
+            flash,
+            empty,
+        };
+        return super::empty_state(f, area, " Ports ", empty, &ctx);
+    }
     let border_style = if focused {
         Style::new().fg(theme.focus_border)
     } else {
@@ -101,6 +115,7 @@ pub fn render(
             Row::new(cells)
         })
         .collect();
+    let body = super::flashed(body, flash);
 
     let table = Table::new(body, widths)
         .header(header)
@@ -145,9 +160,13 @@ mod tests {
                     height: 10,
                 },
                 &endpoints,
-                &theme,
-                true,
-                crate::layout::Band::Wide,
+                super::TableCtx {
+                    theme: &theme,
+                    focused: true,
+                    band: crate::layout::Band::Wide,
+                    flash: &[],
+                    empty: "nothing here",
+                },
                 &mut st,
             )
         })
