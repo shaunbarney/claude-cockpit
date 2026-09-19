@@ -8,7 +8,7 @@ pub mod skills;
 pub mod tools;
 pub mod worktrees;
 
-use ratatui::layout::{Alignment, Rect};
+use ratatui::layout::{Alignment, Constraint, Rect};
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Row};
@@ -30,6 +30,36 @@ pub struct TableCtx<'a> {
     pub flash: &'a [Option<Style>],
     /// What to say when there are no rows to show.
     pub empty: &'a str,
+}
+
+/// Width a column set needs: its own columns plus the gaps between them.
+///
+/// `Fill` and `Percentage` constraints have no intrinsic minimum, so they
+/// contribute nothing — which is the honest answer for "how narrow can this
+/// get".
+pub fn needs_width(widths: &[Constraint], spacing: u16) -> u16 {
+    let cols: u16 = widths
+        .iter()
+        .map(|c| match c {
+            Constraint::Length(n) | Constraint::Min(n) => *n,
+            _ => 0,
+        })
+        .sum();
+    cols + spacing * (widths.len().saturating_sub(1) as u16)
+}
+
+/// True when `area` cannot hold `full` at its natural size, so the widget
+/// should fall back to its reduced column set.
+///
+/// The three-column grid leaves each widget ~65 columns even on a 200-wide
+/// terminal, so keying this off the global size band was wrong twice over: the
+/// band said "Wide" while the cell was cramped (headers came out as "Committe"
+/// and "Uncommi"), and a single global threshold then dropped columns from
+/// narrow tables that had room to spare. Measure the actual column set against
+/// the actual rect.
+pub fn tight(area: Rect, band: Band, full: &[Constraint], spacing: u16) -> bool {
+    // 2 for the block borders.
+    band == Band::Compact || area.width < needs_width(full, spacing) + 2
 }
 
 impl TableCtx<'_> {
@@ -97,6 +127,51 @@ mod tests {
             flash: &[],
             empty: "nothing here",
         }
+    }
+
+    #[test]
+    fn needs_width_counts_columns_and_gaps() {
+        let w = [
+            Constraint::Length(4),
+            Constraint::Min(10),
+            Constraint::Length(6),
+        ];
+        assert_eq!(needs_width(&w, 2), 4 + 10 + 6 + 4);
+        assert_eq!(needs_width(&[], 2), 0);
+        // Fill has no intrinsic minimum.
+        assert_eq!(
+            needs_width(&[Constraint::Fill(1), Constraint::Length(5)], 1),
+            6
+        );
+    }
+
+    #[test]
+    fn tightness_measures_the_column_set_against_the_rect() {
+        // Roughly the Worktrees full set: dot, name, ahead, dirty, two churn
+        // columns and an age.
+        let wide = [
+            Constraint::Length(2),
+            Constraint::Min(16),
+            Constraint::Length(6),
+            Constraint::Length(6),
+            Constraint::Length(13),
+            Constraint::Length(13),
+            Constraint::Length(16),
+        ];
+        let narrow = [Constraint::Min(10), Constraint::Length(6)];
+        let cell = Rect {
+            x: 0,
+            y: 0,
+            width: 65,
+            height: 10,
+        };
+
+        // A "Wide" screen split three ways is still too small for a wide table…
+        assert!(tight(cell, Band::Wide, &wide, 2));
+        // …but has ample room for a narrow one, which must keep its columns.
+        assert!(!tight(cell, Band::Wide, &narrow, 2));
+        // The Compact band always reduces, however small the table.
+        assert!(tight(cell, Band::Compact, &narrow, 2));
     }
 
     #[test]

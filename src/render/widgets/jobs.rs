@@ -8,7 +8,7 @@ use ratatui::Frame;
 
 use super::TableCtx;
 use crate::collect::jobs::Job;
-use crate::layout::Band;
+use crate::theme::Level;
 use crate::util::{human_duration, worktree_label};
 
 /// Truncate `s` to at most `max` chars, appending `…` if it was cut.
@@ -60,8 +60,6 @@ pub fn render(
         .title(" Jobs ")
         .border_style(border_style);
 
-    let compact = band == Band::Compact;
-
     let full_widths: &[Constraint] = &[
         Constraint::Length(2), // dot
         Constraint::Min(16),   // name
@@ -78,6 +76,7 @@ pub fn render(
         Constraint::Length(9), // age
     ];
 
+    let compact = super::tight(area, band, full_widths, 2);
     let widths = if compact { compact_widths } else { full_widths };
 
     let header = if compact {
@@ -92,15 +91,16 @@ pub fn render(
         .iter()
         .map(|j| {
             // Dot/state colour logic.
-            let dot_color = if j.tempo == "active" {
-                theme.accent
+            let level = if j.state == "blocked" {
+                Level::Warn
+            } else if j.tempo == "active" {
+                Level::Active
             } else if j.state == "working" {
-                theme.ok
-            } else if j.state == "blocked" {
-                theme.warn
+                Level::Ok
             } else {
-                theme.dim
+                Level::Idle
             };
+            let dot_color = theme.level_color(level);
 
             // Stuck row: blocked for more than 5 minutes.
             let stuck =
@@ -112,7 +112,7 @@ pub fn render(
                 Style::new()
             };
 
-            let dot_cell = Cell::from(Span::styled("●", Style::new().fg(dot_color)));
+            let dot_cell = Cell::from(theme.level_span(level));
             let name_cell = Cell::from(Span::styled(
                 j.name.clone(),
                 Style::new().add_modifier(Modifier::BOLD),

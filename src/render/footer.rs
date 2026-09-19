@@ -140,16 +140,15 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             .sum::<usize>(),
     );
 
-    for (key, desc) in hints(app) {
-        let w = key.chars().count() + desc.chars().count() + 3;
+    for (i, (key, desc)) in hints(app).into_iter().enumerate() {
+        let sep = if i == 0 { "  " } else { "  ·  " };
+        let w = sep.chars().count() + key.chars().count() + desc.chars().count() + 1;
         if w > left {
             break;
         }
         left -= w;
-        spans.push(Span::styled(
-            format!(" {key}"),
-            Style::new().fg(theme.accent),
-        ));
+        spans.push(Span::styled(sep, theme.dim_style()));
+        spans.push(Span::styled(key.to_string(), Style::new().fg(theme.accent)));
         spans.push(Span::styled(format!(" {desc}"), theme.dim_style()));
     }
 

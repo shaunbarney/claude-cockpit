@@ -8,8 +8,7 @@ use ratatui::Frame;
 
 use super::TableCtx;
 use crate::collect::docker::Container;
-use crate::layout::Band;
-use crate::theme::Theme;
+use crate::theme::{Level, Theme};
 use crate::util::human_bytes;
 
 /// Truncate `s` to at most `max` chars, appending `…` if cut.
@@ -22,18 +21,22 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 /// Row colour determined by health and state.
-fn row_color(c: &Container, theme: &Theme) -> ratatui::style::Color {
+fn row_level(c: &Container) -> Level {
     match c.health.as_deref() {
-        Some("unhealthy") => theme.err,
-        Some("starting") | Some("health: starting") => theme.warn,
+        Some("unhealthy") => Level::Err,
+        Some("starting") | Some("health: starting") => Level::Warn,
         _ => {
             if c.state == "running" {
-                theme.ok
+                Level::Ok
             } else {
-                theme.dim
+                Level::Idle
             }
         }
     }
+}
+
+fn row_color(c: &Container, theme: &Theme) -> ratatui::style::Color {
+    theme.level_color(row_level(c))
 }
 
 /// Health display: health word if present, else the state string.
@@ -90,8 +93,6 @@ pub fn render(
         return;
     }
 
-    let compact = band == Band::Compact;
-
     let full_widths: &[Constraint] = &[
         Constraint::Length(2),  // dot
         Constraint::Min(16),    // name
@@ -107,6 +108,7 @@ pub fn render(
         Constraint::Min(12),   // mem
     ];
 
+    let compact = super::tight(area, band, full_widths, 2);
     let widths = if compact { compact_widths } else { full_widths };
 
     let header = if compact {
@@ -121,7 +123,7 @@ pub fn render(
         .map(|c| {
             let color = row_color(c, theme);
 
-            let dot_cell = Cell::from(Span::styled("●", Style::new().fg(color)));
+            let dot_cell = Cell::from(theme.level_span(row_level(c)));
             let name_cell = Cell::from(Span::styled(
                 truncate(&c.name, 24),
                 Style::new().add_modifier(Modifier::BOLD),

@@ -8,7 +8,7 @@ use ratatui::Frame;
 
 use super::TableCtx;
 use crate::collect::git::Worktree;
-use crate::layout::Band;
+use crate::theme::Level;
 
 /// A `+A/-D` churn span (green) or a dim em-dash when not shown.
 fn churn(pair: (u32, u32), show: bool) -> Span<'static> {
@@ -59,8 +59,6 @@ pub fn render(
         .title(" Worktrees ")
         .border_style(border_style);
 
-    let compact = band == Band::Compact;
-
     // Column widths differ between compact and full.
     let full_widths: &[Constraint] = &[
         Constraint::Length(2),
@@ -79,6 +77,7 @@ pub fn render(
         Constraint::Length(16),
     ];
 
+    let compact = super::tight(area, band, full_widths, 2);
     let widths = if compact { compact_widths } else { full_widths };
 
     let header = if compact {
@@ -100,21 +99,16 @@ pub fn render(
     let body: Vec<Row> = rows
         .iter()
         .map(|r| {
-            let (dot_color, ahead_span) = if r.ahead > 0 {
+            // Unpushed commits are the loudest state, then an uncommitted tree.
+            let (level, ahead_span) = if r.ahead > 0 {
                 (
-                    Color::Red,
-                    Span::styled(r.ahead.to_string(), Style::new().fg(Color::Red)),
+                    Level::Err,
+                    Span::styled(r.ahead.to_string(), Style::new().fg(theme.err)),
                 )
             } else if r.dirty > 0 {
-                (
-                    Color::Yellow,
-                    Span::styled("0", Style::new().fg(Color::DarkGray)),
-                )
+                (Level::Warn, Span::styled("0", theme.dim_style()))
             } else {
-                (
-                    Color::Green,
-                    Span::styled("0", Style::new().fg(Color::DarkGray)),
-                )
+                (Level::Ok, Span::styled("0", theme.dim_style()))
             };
 
             let dirty_span = if r.dirty > 0 {
@@ -128,7 +122,7 @@ pub fn render(
 
             if compact {
                 Row::new(vec![
-                    Cell::from(Span::styled("●", Style::new().fg(dot_color))),
+                    Cell::from(theme.level_span(level)),
                     Cell::from(name_span),
                     Cell::from(ahead_span),
                     Cell::from(dirty_span),
@@ -136,7 +130,7 @@ pub fn render(
                 ])
             } else {
                 Row::new(vec![
-                    Cell::from(Span::styled("●", Style::new().fg(dot_color))),
+                    Cell::from(theme.level_span(level)),
                     Cell::from(name_span),
                     Cell::from(ahead_span),
                     Cell::from(dirty_span),

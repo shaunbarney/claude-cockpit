@@ -12,6 +12,9 @@ use crate::collect::jobs::{Job, JobEvent};
 use crate::theme::Theme;
 use crate::util::{human_duration, worktree_label};
 
+/// Header height: four content lines plus the border.
+const HEADER_H: u16 = 6;
+
 /// Colour a state string using theme semantics.
 fn state_style(state: &str, theme: &Theme) -> Style {
     match state {
@@ -23,7 +26,9 @@ fn state_style(state: &str, theme: &Theme) -> Style {
 
 /// Render the full-screen job detail view.
 ///
-/// Layout: 7-line header block (bordered) + body timeline block (rest).
+/// Layout: a header block sized to its own content + the timeline taking the
+/// rest. The header used to be pinned at 7 lines for 3 lines of text, which
+/// wasted two rows of a view whose whole job is showing a long timeline.
 pub fn render(
     f: &mut Frame,
     area: ratatui::layout::Rect,
@@ -33,7 +38,7 @@ pub fn render(
     now: i64,
     scroll: u16,
 ) {
-    let chunks = Layout::vertical([Constraint::Length(7), Constraint::Min(0)]).split(area);
+    let chunks = Layout::vertical([Constraint::Length(HEADER_H), Constraint::Min(0)]).split(area);
 
     render_header(f, chunks[0], job, theme, now);
     render_timeline(f, chunks[1], events, theme, scroll);
@@ -64,6 +69,14 @@ fn render_header(f: &mut Frame, area: ratatui::layout::Rect, job: &Job, theme: &
             state_sp,
             Span::raw("  Tempo: "),
             tempo_sp,
+        ]),
+        Line::from(vec![
+            Span::styled("Doing: ", theme.dim_style()),
+            Span::raw(if job.intent.is_empty() {
+                "—".to_string()
+            } else {
+                job.intent.clone()
+            }),
         ]),
         Line::from(vec![
             Span::raw("Worktree: "),
@@ -135,15 +148,22 @@ fn render_timeline(
         .collect();
 
     let inner = block.inner(area);
+    // Scrolling past the last line just shows blank space, so stop there.
+    let max_scroll = (n as u16).saturating_sub(inner.height);
+    let scroll = scroll.min(max_scroll);
+
     let p = Paragraph::new(Text::from(lines))
         .block(block)
         .scroll((scroll, 0));
     f.render_widget(p, area);
 
-    // Scrollbar on the right side.
-    let mut sb_state = ScrollbarState::new(n).position(scroll as usize);
-    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
-    f.render_stateful_widget(scrollbar, inner, &mut sb_state);
+    // A scrollbar over content that already fits is noise — and a full-height
+    // thumb reads as "stuck", which is worse than no scrollbar at all.
+    if max_scroll > 0 {
+        let mut sb_state = ScrollbarState::new(n).position(scroll as usize);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+        f.render_stateful_widget(scrollbar, inner, &mut sb_state);
+    }
 }
 
 #[cfg(test)]
@@ -232,5 +252,46 @@ mod tests {
             s.contains("tests passing"),
             "expected second event detail in buffer"
         );
+        assert!(
+            s.contains("Implement the governour cockpit detail view"),
+            "the intent is the one field saying what the agent is doing"
+        );
+    }
+
+    #[test]
+    fn no_scrollbar_when_the_timeline_already_fits() {
+        let job = mk_job("Job");
+        let events = vec![mk_event("working", "one thing", "")];
+        let theme = Theme::default();
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        term.draw(|f| {
+            render(f, f.area(), &job, &events, &theme, 1_001_000, 0);
+        })
+        .unwrap();
+        let s = buffer_text(term.backend().buffer());
+        assert!(
+            !s.contains('\u{2588}'),
+            "a full-height thumb reads as stuck"
+        );
+    }
+
+    #[test]
+    fn scrolling_past_the_end_is_clamped() {
+        let job = mk_job("Job");
+        let events: Vec<JobEvent> = (0..40)
+            .map(|i| mk_event("working", &format!("event {i}"), ""))
+            .collect();
+        let theme = Theme::default();
+        let draw = |scroll: u16| {
+            let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            term.draw(|f| {
+                render(f, f.area(), &job, &events, &theme, 1_001_000, scroll);
+            })
+            .unwrap();
+            buffer_text(term.backend().buffer())
+        };
+        // Way past the end must land on the same frame as the true end, not
+        // on an empty pane.
+        assert_eq!(draw(9_000), draw(40 - (24 - HEADER_H - 2)));
     }
 }

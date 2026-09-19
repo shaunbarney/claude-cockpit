@@ -53,6 +53,46 @@ fn proximity_color(r: f64, theme: &Theme) -> ratatui::style::Color {
     }
 }
 
+/// Summary line, trimmed to fit `width`.
+///
+/// In the three-column grid this widget gets ~65 columns, where the full line
+/// ran off the end mid-word ("cache-hit " with no number). Drop whole facts
+/// instead of characters: a shorter true line beats a longer truncated one.
+fn summary_line(
+    prompts: u64,
+    plan: &str,
+    tokens: u64,
+    cache_pct: u64,
+    width: u16,
+    theme: &Theme,
+) -> Line<'static> {
+    let head = format!("{prompts} prompts");
+    let tok = format!("{} tok", human(tokens));
+    let cache = format!("cache-hit {cache_pct}%");
+    let w = width as usize;
+
+    // 3 for the "5h " prefix, 5 per "  ·  " separator.
+    let full = 3 + head.len() + 5 + plan.len() + 5 + tok.len() + 5 + cache.len();
+    let mid = 3 + head.len() + 5 + tok.len() + 5 + cache.len();
+
+    let mut spans = vec![
+        Span::styled("5h ", theme.dim_style()),
+        Span::styled(head, Style::new().fg(theme.accent)),
+    ];
+    let sep = |t: &Theme| Span::styled("  ·  ", t.dim_style());
+    if full <= w {
+        spans.push(sep(theme));
+        spans.push(Span::styled(plan.to_string(), theme.muted_style()));
+    }
+    if mid <= w {
+        spans.push(sep(theme));
+        spans.push(Span::raw(tok));
+        spans.push(sep(theme));
+        spans.push(Span::raw(cache));
+    }
+    Line::from(spans)
+}
+
 pub fn render(
     f: &mut Frame,
     area: Rect,
@@ -92,17 +132,14 @@ pub fn render(
     } else {
         rate.plan_label.clone()
     };
-    let summary = Line::from(vec![
-        Span::styled("5h ", theme.dim_style()),
-        Span::styled(
-            format!("{} prompts", rate.prompts_5h),
-            Style::new().fg(theme.accent),
-        ),
-        Span::styled(format!("  ·  {}  ·  ", plan), theme.dim_style()),
-        Span::raw(format!("{} tok", human(rate.tokens_5h))),
-        Span::styled("  ·  cache-hit ", theme.dim_style()),
-        Span::raw(format!("{cache_pct}%")),
-    ]);
+    let summary = summary_line(
+        rate.prompts_5h,
+        &plan,
+        rate.tokens_5h,
+        cache_pct,
+        inner.width,
+        theme,
+    );
 
     let spark: Vec<u64> = rate.burn_trend.values.iter().map(|v| *v as u64).collect();
     let spark_max = spark.iter().copied().max().unwrap_or(1).max(1);
@@ -282,5 +319,44 @@ mod tests {
         assert!(s.contains("Rate"), "expected 'Rate' title");
         assert!(s.contains("5h"), "expected 5h window gauge");
         assert!(s.contains("resets"), "expected reset countdown");
+    }
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+    use crate::theme::Depth;
+
+    fn text(width: u16) -> String {
+        let theme = Theme::new(Depth::True, None);
+        summary_line(13, "Max 5x", 255_400_000, 97, width, &theme)
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn wide_summary_keeps_every_fact() {
+        let s = text(120);
+        assert!(s.contains("13 prompts"));
+        assert!(s.contains("Max 5x"));
+        assert!(s.contains("cache-hit 97%"));
+    }
+
+    #[test]
+    fn narrow_summary_drops_facts_rather_than_truncating() {
+        // A grid cell: the plan goes first, the numbers stay whole.
+        let s = text(52);
+        assert!(s.contains("13 prompts"));
+        assert!(!s.contains("Max 5x"));
+        assert!(s.contains("cache-hit 97%"), "{s}");
+        assert!(s.chars().count() <= 52, "{s}");
+
+        // Very narrow: only the headline survives, still complete.
+        let s = text(20);
+        assert!(s.contains("13 prompts"));
+        assert!(!s.contains("cache-hit"));
+        assert!(s.chars().count() <= 20, "{s}");
     }
 }

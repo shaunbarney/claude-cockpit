@@ -8,7 +8,7 @@ use ratatui::Frame;
 
 use super::TableCtx;
 use crate::collect::ports::Endpoint;
-use crate::layout::Band;
+use crate::theme::Level;
 
 /// Render the Ports table into `area`.
 ///
@@ -58,8 +58,6 @@ pub fn render(
         return;
     }
 
-    let compact = band == Band::Compact;
-
     let full_widths: &[Constraint] = &[
         Constraint::Length(2),  // dot
         Constraint::Min(12),    // service
@@ -74,6 +72,7 @@ pub fn render(
         Constraint::Length(10), // latency
     ];
 
+    let compact = super::tight(area, band, full_widths, 1);
     let widths = if compact { compact_widths } else { full_widths };
 
     let header = if compact {
@@ -87,8 +86,8 @@ pub fn render(
     let body: Vec<Row> = endpoints
         .iter()
         .map(|e| {
-            let dot_color = if e.up { theme.ok } else { theme.err };
-            let dot_cell = Cell::from(Span::styled("●", Style::new().fg(dot_color)));
+            let level = if e.up { Level::Ok } else { Level::Err };
+            let dot_cell = Cell::from(theme.level_span(level));
 
             let service_cell = Cell::from(Span::styled(
                 e.label.clone(),

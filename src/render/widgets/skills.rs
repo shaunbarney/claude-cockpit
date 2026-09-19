@@ -9,7 +9,6 @@ use ratatui::Frame;
 
 use super::TableCtx;
 use crate::collect::skills::Skill;
-use crate::layout::Band;
 use crate::theme::Theme;
 use crate::util::thousands;
 
@@ -72,7 +71,14 @@ pub fn render(
         .border_style(border_style);
 
     let max = skills.iter().map(|s| s.uses).max().unwrap_or(1).max(1) as f64;
-    let compact = band == Band::Compact;
+
+    let full_widths: &[Constraint] = &[
+        Constraint::Min(16),
+        Constraint::Length(9),
+        Constraint::Length(6),
+        Constraint::Min(8),
+    ];
+    let compact = super::tight(area, band, full_widths, 2);
 
     let widths: &[Constraint] = if compact {
         &[Constraint::Min(12), Constraint::Length(6)]
@@ -136,6 +142,7 @@ pub fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layout::Band;
     use ratatui::{backend::TestBackend, Terminal};
 
     fn skill(name: &str, source: &str, uses: u64) -> Skill {
@@ -156,14 +163,14 @@ mod tests {
             skill("deploy", "project", 5),
         ];
         let mut state = TableState::default();
-        let mut term = Terminal::new(TestBackend::new(80, 10)).unwrap();
+        let mut term = Terminal::new(TestBackend::new(120, 10)).unwrap();
         term.draw(|f| {
             render(
                 f,
                 Rect {
                     x: 0,
                     y: 0,
-                    width: 80,
+                    width: 120,
                     height: 10,
                 },
                 &skills,
@@ -187,6 +194,45 @@ mod tests {
             .collect();
         assert!(s.contains("Skills"));
         assert!(s.contains("understand"));
+        // A roomy cell keeps the optional Source column.
         assert!(s.contains("personal"));
+    }
+
+    #[test]
+    fn a_narrow_cell_drops_optional_columns() {
+        let skills = vec![skill("understand", "personal", 9)];
+        let mut state = TableState::default();
+        let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        term.draw(|f| {
+            render(
+                f,
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 40,
+                    height: 10,
+                },
+                &skills,
+                super::TableCtx {
+                    theme: &Theme::default(),
+                    focused: true,
+                    band: Band::Wide,
+                    flash: &[],
+                    empty: "nothing here",
+                },
+                &mut state,
+            );
+        })
+        .unwrap();
+        let s: String = term
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        // Better to drop a column than to render "Sourc" and a squeezed name.
+        assert!(s.contains("understand"));
+        assert!(!s.contains("personal"));
     }
 }
