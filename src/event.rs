@@ -490,7 +490,10 @@ fn event_loop<B: ratatui::backend::Backend>(
     term: &mut ratatui::Terminal<B>,
     app: &mut App,
     root: &str,
-) -> io::Result<()> {
+) -> io::Result<()>
+where
+    io::Error: From<B::Error>,
+{
     // Redraw only when the data revision changes or input arrives, so an idle
     // dashboard does no work. `u64::MAX` forces the first frame. Background
     // refreshes bump `rev` every 2–10 s, which keeps time-based fields (ages,

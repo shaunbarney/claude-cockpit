@@ -24,6 +24,20 @@ pub struct Config {
     /// unset auto-scales to your own observed peak instead.
     #[serde(default)]
     pub rate_limit: RateLimit,
+    /// Colour depth and accent overrides.
+    #[serde(default)]
+    pub theme: ThemeConfig,
+}
+
+/// Theme overrides. Both fields are optional; with neither set the palette is
+/// detected from the environment (`NO_COLOR`, then `COLORTERM`).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+pub struct ThemeConfig {
+    /// `"mono"`, `"ansi"`, or `"true"`. Unset (or unrecognised) auto-detects.
+    /// `NO_COLOR` in the environment always wins over this.
+    pub mode: Option<String>,
+    /// Accent as `#rrggbb`. Only applies on the truecolor tier.
+    pub accent: Option<String>,
 }
 
 /// Known rate-limit caps. All optional — unset fields auto-scale to the
@@ -65,6 +79,7 @@ impl Default for Config {
             endpoints: Vec::new(),
             discover_endpoints: true,
             rate_limit: RateLimit::default(),
+            theme: ThemeConfig::default(),
         }
     }
 }
@@ -119,6 +134,14 @@ mod tests {
     fn empty_is_default() {
         assert_eq!(parse(""), Config::default());
         assert_eq!(parse("garbage = ["), Config::default()); // parse error -> default
+    }
+    #[test]
+    fn parses_theme_overrides() {
+        let cfg = parse("[theme]\nmode = \"mono\"\naccent = \"#ff8800\"");
+        assert_eq!(cfg.theme.mode.as_deref(), Some("mono"));
+        assert_eq!(cfg.theme.accent.as_deref(), Some("#ff8800"));
+        // Absent section leaves both unset.
+        assert_eq!(parse("").theme, ThemeConfig::default());
     }
     #[test]
     fn discover_endpoints_defaults_on_and_is_toggleable() {

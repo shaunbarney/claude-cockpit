@@ -6,15 +6,19 @@
 //! the binary has a documented library target; the public surface is internal
 //! and not a stability guarantee.
 
+pub mod anim;
 pub mod app;
 pub mod collect;
 pub mod config;
 pub mod event;
+pub mod fuzzy;
 pub mod graph;
 pub mod layout;
 pub mod refresh;
 pub mod render;
+pub mod rows;
 pub mod theme;
 pub mod trend;
 pub mod util;
+pub mod view;
 pub mod widget;

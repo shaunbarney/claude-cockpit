@@ -19,7 +19,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 comfy-table = { version = "7", features = ["crossterm"] }
-ratatui = "0.29"
+ratatui = "0.30"
 console = "0.15"
 tokei = "14"
 serde = { version = "1", features = ["derive"] }
@@ -27,6 +27,7 @@ serde_json = "1"
 ureq = { version = "2", default-features = false, features = ["tls"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 dirs = "5"
+nucleo-matcher = "0.3"
 toml = "0.8"
 
 [profile.release]
