@@ -20,7 +20,9 @@
 
 `claude-cockpit` is a single, fast Rust TUI that answers "what's going on?" across everything you run while developing with Claude Code. It reads only local files (`~/.claude/…` and files in your repo) and standard CLIs (`git`, `docker`, `lsof`) — no network required for the core, no daemon, no telemetry.
 
-The layout reflows to your terminal: a multi-column grid on a wide screen, a single column on a narrow one, and a "resize me" guard when there's truly no room. Drive it with the keyboard or the mouse.
+The layout reflows to your terminal: a multi-column grid on a wide screen, a single column on a narrow one, and a "resize me" guard when there's truly no room. Grid rows are sized by how much each widget has to show, so an empty box doesn't claim the same space as a busy table — but widgets never move, so "Docker is bottom-right" stays true.
+
+Drive it with the keyboard or the mouse: `/` filters any table as you type, `:` opens a command palette over everything the cockpit can do, and `s` sorts. Rows that change between refreshes flash and fade, so a job going blocked is something you see happen rather than notice later.
 
 ## Widgets
 
@@ -73,16 +75,36 @@ claude-cockpit --help
 
 ### Keys
 
+**Move**
+
 | Key | Action |
 |-----|--------|
-| `Tab` / `←` `→` / `h` `l` | Move focus between widgets |
-| `↑` `↓` / `j` `k` | Select a row, or scroll inside a detail/diff view |
-| `Enter` / click | Drill into the focused row/widget (worktree · job · container · cost · ports · repo) |
+| `Tab` / `⇧Tab` | Cycle focus between widgets |
+| `←` `→` / `h` `l` / `↑` `↓` | Move focus to the widget in that direction |
+| `j` / `k` | Select a row, or scroll inside a detail/diff view |
+| `g` / `G` | Jump to the first / last row |
+| `PgUp` / `PgDn`, `Ctrl-D` / `Ctrl-U` | Page through rows |
+
+**Act**
+
+| Key | Action |
+|-----|--------|
+| `Enter` / click | Drill into the focused row (worktree · job · container · cost · ports · skill) |
 | `e` | Expand the focused widget to full screen |
 | `r` | Refresh now |
-| `?` | Toggle the help overlay |
-| `Esc` | Back out of a detail view / close help |
+| `Esc` | Clear the filter, back out of a detail view, or close an overlay |
 | `q` / `Ctrl-C` | Quit |
+
+**Find**
+
+| Key | Action |
+|-----|--------|
+| `/` | Filter the focused widget's rows as you type. `Enter` keeps the filter, `Esc` drops it |
+| `:` or `Ctrl-K` | Command palette — fuzzy-search every action, including jumping to any widget |
+| `s` / `S` | Cycle the sort column / reverse it |
+| `?` | Toggle the key help |
+
+Filtering is fuzzy and searches more than the name column: a job matches on its state and intent, a container on its health and published ports. The footer shows the live match count, and the filter and sort in force.
 
 The mouse works too — click a widget to focus it, click a row to select it, and scroll to move the selection or a diff.
 
@@ -97,6 +119,13 @@ The mouse works too — click a widget to focus it, click a row to select it, an
 To pin endpoints, set rate-limit caps, or turn docker discovery off, drop a `claude-cockpit.toml` in the repo root, or `~/.config/claude-cockpit/config.toml`:
 
 ```toml
+# Colour. Omit the whole section to auto-detect: NO_COLOR in the environment
+# forces monochrome, COLORTERM=truecolor enables the 24-bit palette, and
+# anything else uses the 16 ANSI colours (so it follows your terminal theme).
+[theme]
+# mode   = "true"      # mono | ansi | true
+# accent = "#7C5CFF"   # only applies on the truecolor tier
+
 # Auto-discover endpoints from docker-compose / Dockerfile port mappings
 # in the repo, in addition to any [[endpoints]] below. Default: true.
 discover_endpoints = true

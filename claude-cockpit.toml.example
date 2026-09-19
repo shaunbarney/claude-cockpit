@@ -6,6 +6,18 @@
 # (falling back to live TCP listeners), and the Processes widget monitors a
 # built-in dev-tool set (claude, node, python, cargo, rustc, …).
 
+# Colour. Omit this section entirely to auto-detect, which is usually right:
+#   NO_COLOR set in the environment  -> monochrome (always wins, even over
+#                                       `mode` below — it is a user-level opt-out)
+#   COLORTERM=truecolor / 24bit      -> 24-bit palette
+#   anything else                    -> the 16 ANSI colours, so the cockpit
+#                                       follows your own terminal theme
+# Nothing depends on colour to be readable: status is also carried by shape
+# (● ok, ◐ degraded, ✕ failed, ○ idle, ◉ active).
+[theme]
+# mode   = "true"      # mono | ansi | true
+# accent = "#7C5CFF"   # brand colour; only applies on the truecolor tier
+
 # Auto-discover endpoints from docker-compose / Dockerfile port mappings in the
 # repo, in addition to any [[endpoints]] below. Set to false to use only the
 # endpoints you list here. Default: true.
