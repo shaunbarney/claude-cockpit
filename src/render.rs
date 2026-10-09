@@ -261,6 +261,7 @@ mod tests {
             committed: (0, 0),
             uncommitted: (0, 0),
             age: String::new(),
+            ..Default::default()
         };
         let rows = vec![mk(3, 0), mk(0, 2), mk(0, 0), mk(0, 0)];
         let line = summary_line(&rows, "");

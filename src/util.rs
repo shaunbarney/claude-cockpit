@@ -50,21 +50,22 @@ pub fn short_model(name: &str) -> String {
     name.strip_prefix("claude-").unwrap_or(name).to_string()
 }
 
-/// Display string for a job's worktree: branch (sans redundant `worktree-` prefix),
-/// else the worktree folder name, else "—".
+/// Display string for a job's worktree: the worktree folder name, else the
+/// branch, else "—". Shown verbatim (no prefix stripping) so it matches the
+/// Worktrees pane exactly.
 pub fn worktree_label(branch: Option<&str>, path: Option<&str>) -> String {
     // Prefer the worktree FOLDER name: it's what `git worktree list` and the
     // Worktrees widget show, so the Jobs "Worktree" column matches it exactly.
     if let Some(p) = path {
         if let Some(name) = std::path::Path::new(p).file_name().and_then(|s| s.to_str()) {
             if !name.is_empty() {
-                return name.strip_prefix("worktree-").unwrap_or(name).to_string();
+                return name.to_string();
             }
         }
     }
     if let Some(b) = branch {
         if !b.is_empty() {
-            return b.strip_prefix("worktree-").unwrap_or(b).to_string();
+            return b.to_string();
         }
     }
     "—".to_string()
@@ -90,8 +91,12 @@ mod tests {
         assert_eq!(thousands(12345), "12,345");
     }
     #[test]
-    fn worktree_label_prefers_folder_and_strips_prefix() {
-        assert_eq!(worktree_label(Some("worktree-x"), None), "x");
+    fn worktree_label_prefers_folder_verbatim() {
+        assert_eq!(worktree_label(Some("worktree-x"), None), "worktree-x");
+        assert_eq!(
+            worktree_label(None, Some("/r/.claude/worktrees/worktree-y")),
+            "worktree-y"
+        );
         assert_eq!(worktree_label(Some("feat/demo"), None), "feat/demo");
         assert_eq!(worktree_label(None, Some("/repo/.claude/worktrees/y")), "y");
         // Folder name wins over branch so Jobs matches the Worktrees widget.

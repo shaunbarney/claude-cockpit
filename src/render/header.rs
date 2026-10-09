@@ -240,6 +240,7 @@ mod tests {
             worktree_branch: None,
             created_at: Some(0),
             updated_at: Some(0),
+            ..Default::default()
         }
     }
 
@@ -253,6 +254,7 @@ mod tests {
             committed: (0, 0),
             uncommitted: (0, 0),
             age: "1d".into(),
+            ..Default::default()
         }
     }
 

@@ -97,6 +97,15 @@ fn render_activity(
             format!("conflicts with main ({} files)", c.len()),
             Style::new().fg(theme.err),
         ),
+        MergeStatus::NothingToMerge(n) => Line::styled(
+            format!("nothing to merge — base is {} commits ahead", n),
+            theme.dim_style(),
+        ),
+        MergeStatus::Dirty(n) => Line::styled(
+            format!("{} uncommitted changes — commit before merging", n),
+            Style::new().fg(theme.warn),
+        ),
+        MergeStatus::Unknown => Line::styled("merge status unknown", theme.dim_style()),
     };
 
     let text = ratatui::text::Text::from(vec![activity_line, merge_line]);
@@ -202,6 +211,7 @@ mod tests {
                 added: 10,
                 deleted: 2,
                 staged: false,
+                ..Default::default()
             }],
             uncommitted_files: vec![],
             commits: vec![CommitRow {
@@ -210,6 +220,7 @@ mod tests {
                 age: "2 hours ago".into(),
             }],
             merge: MergeStatus::Clean,
+            ..Default::default()
         }
     }
 

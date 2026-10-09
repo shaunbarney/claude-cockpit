@@ -277,6 +277,7 @@ mod tests {
             committed: (0, 0),
             uncommitted: (0, 0),
             age: "1d".into(),
+            ..Default::default()
         }
     }
 
