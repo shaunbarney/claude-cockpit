@@ -50,6 +50,10 @@ pub enum Action {
     BeginPalette,
     SortCycle,
     SortReverse,
+    /// Open the project picker.
+    Projects,
+    /// Switch to the `n`th pinned project (`0` is the `1` key).
+    PinnedProject(usize),
     /// A character typed into the filter or palette.
     Input(char),
     Backspace,
@@ -106,6 +110,8 @@ pub fn map_key(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Action {
         KeyCode::Char('s') => Action::SortCycle,
         KeyCode::Char('S') => Action::SortReverse,
         KeyCode::Char('?') => Action::Help,
+        KeyCode::Char('P') => Action::Projects,
+        KeyCode::Char(c @ '1'..='9') => Action::PinnedProject(c as usize - '1' as usize),
         _ => Action::None,
     }
 }
@@ -460,7 +466,8 @@ fn clear_filter(app: &mut App) {
 
 /// The palette entries plus the indices matching the current input.
 pub fn palette_state(app: &mut App) -> (Vec<palette::Entry>, Vec<usize>) {
-    let entries = palette::registry(app.focus, table_ops(app));
+    let mut entries = palette::registry(app.focus, table_ops(app));
+    entries.extend(palette::project_entries(&app.project_list));
     let input = app.input.clone();
     let hits = palette::search(&entries, &input, &mut app.fuzzy);
     (entries, hits)
@@ -484,6 +491,10 @@ fn run_command(app: &mut App, cmd: Command, root: &str) {
             }
         }
         Command::Refresh => kick_refresh(app, root),
+        Command::Projects => crate::projects::host::open(app, root),
+        Command::SwitchProject(i) => {
+            app.pending_switch = app.project_list.get(i).map(|p| p.root.clone());
+        }
         Command::Help => app.show_help = !app.show_help,
         Command::Quit => app.should_quit = true,
     }
@@ -548,6 +559,10 @@ pub fn apply(app: &mut App, action: Action, root: &str) {
     match action {
         Action::Quit => app.should_quit = true,
         Action::Refresh => kick_refresh(app, root),
+        Action::Projects => crate::projects::host::open(app, root),
+        Action::PinnedProject(n) => {
+            app.pending_switch = crate::projects::host::pinned_root(&app.project_list, n);
+        }
         Action::FocusNext => app.focus_next(),
         Action::FocusPrev => app.focus_prev(),
         Action::FocusUp | Action::FocusDown => {

@@ -26,6 +26,10 @@ pub enum Command {
     Sort(usize),
     /// Re-run the collectors now.
     Refresh,
+    /// Open the project picker.
+    Projects,
+    /// Switch to the `n`th entry of `App::project_list`.
+    SwitchProject(usize),
     /// Toggle the key help.
     Help,
     Quit,
@@ -57,6 +61,31 @@ impl Entry {
 /// than a generic list that is wrong most of the time. `table_ops` says whether
 /// filter and sort can apply at all — false on a chart widget or a detail
 /// screen, where offering them would promise something that cannot happen.
+/// "Switch to …" entries for registered projects, so `:sovra<Enter>` jumps
+/// straight there; plus the picker itself.
+pub fn project_entries(list: &[crate::projects::host::ListedProject]) -> Vec<Entry> {
+    let mut out = vec![Entry::new(
+        "Projects — switch, add, manage",
+        "P",
+        Command::Projects,
+    )];
+    let mut hot = 0;
+    for (i, p) in list.iter().enumerate() {
+        let hint = if p.pinned && hot < 9 {
+            hot += 1;
+            hot.to_string()
+        } else {
+            String::new()
+        };
+        out.push(Entry::new(
+            format!("Switch to project {}", p.name),
+            hint,
+            Command::SwitchProject(i),
+        ));
+    }
+    out
+}
+
 pub fn registry(focus: WidgetKind, table_ops: bool) -> Vec<Entry> {
     let mut out: Vec<Entry> = WidgetKind::all()
         .iter()

@@ -65,6 +65,9 @@ pub struct Picker {
     pub message: Option<(String, bool)>,
     /// Root of the project currently on screen.
     pub current: Option<PathBuf>,
+    /// Set when the registry file failed to parse: saving would overwrite the
+    /// user's (recoverable) file with an empty list, so edits are refused.
+    pub read_only: bool,
 }
 
 impl Picker {
@@ -81,6 +84,7 @@ impl Picker {
             filter: String::new(),
             message: None,
             current: current.map(|c| canonical(&c)),
+            read_only: false,
         };
         p.rows = p.skeleton_rows();
         p.refilter(&mut Fuzzy::default());
@@ -212,6 +216,10 @@ impl Picker {
     }
 
     fn save(&mut self) -> Outcome {
+        if self.read_only {
+            self.say("projects.toml has errors — fix it by hand first", true);
+            return Outcome::None;
+        }
         let saved = save_registry_to(&self.files.registry, &self.registry)
             .and_then(|()| save_state_to(&self.files.state, &self.state));
         match saved {
@@ -663,6 +671,14 @@ mod tests {
             .into_owned();
         assert_eq!(key(&mut p, KeyCode::Enter), Outcome::Changed);
         assert_eq!(canonical(&p.selected_row().unwrap().path), canonical(&repo));
+    }
+
+    #[test]
+    fn read_only_refuses_to_save() {
+        let (mut p, _, _) = picker();
+        p.read_only = true;
+        assert_eq!(key(&mut p, KeyCode::Char('p')), Outcome::None);
+        assert!(!p.files.registry.exists());
     }
 
     #[test]

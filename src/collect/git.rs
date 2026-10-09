@@ -1,6 +1,5 @@
 //! Git data gathering for worktree health.
 
-
 /// Parse `git diff --shortstat` output into `(insertions, deletions)`.
 /// Mirrors the Python `shortstat()` regex behaviour: missing numbers are 0.
 pub fn parse_shortstat(s: &str) -> (u32, u32) {

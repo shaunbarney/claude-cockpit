@@ -32,6 +32,8 @@ pub struct DashboardData {
     pub endpoints: Vec<crate::collect::ports::Endpoint>,
     pub tools: Vec<crate::collect::tools::ToolStat>,
     pub skills: Vec<crate::collect::skills::Skill>,
+    /// One row per registered project and suggestion, for the project picker.
+    pub project_rows: Vec<crate::projects::overview::ProjectRow>,
     /// Monotonic revision, bumped by every `publish_*`. The render loop redraws
     /// only when this changes (or on input), so an idle dashboard costs no CPU.
     pub rev: u64,
@@ -183,6 +185,15 @@ pub struct App {
     pub load_token: u64,
     /// A background drill-in is in flight.
     pub loading: bool,
+
+    /// The project picker, while it is open. Modal: it takes every key.
+    pub picker: Option<crate::projects::picker::Picker>,
+    /// Registered projects, pinned first — feeds the palette's "Switch to …"
+    /// entries and the `1`–`9` hotkeys without a disk read per key.
+    pub project_list: Vec<crate::projects::host::ListedProject>,
+    /// A project switch requested by a key or command, applied by the run loop
+    /// (which owns the refresh threads).
+    pub pending_switch: Option<std::path::PathBuf>,
 }
 
 impl App {
@@ -221,7 +232,33 @@ impl App {
             load_rx,
             load_token: 0,
             loading: false,
+            picker: None,
+            project_list: Vec::new(),
+            pending_switch: None,
         }
+    }
+
+    /// Forget everything tied to the previous project: open details, cached
+    /// drill-ins, selections, filters, and change-flash history (otherwise
+    /// every row of the new project would flash as "changed").
+    pub fn reset_for_project(&mut self) {
+        self.view = View::Dashboard;
+        self.origin = None;
+        self.mode = Mode::Normal;
+        self.input.clear();
+        self.detail_scroll = 0;
+        self.wt_path = None;
+        self.wt_detail = None;
+        self.wt_requested = None;
+        self.container_logs.clear();
+        self.timeline = None;
+        self.ui.clear();
+        self.visible.clear();
+        self.visible_keys.clear();
+        self.sigs.clear();
+        self.flashes = Flashes::default();
+        self.load_token = self.load_token.wrapping_add(1);
+        self.loading = false;
     }
 
     /// Widgets the dashboard currently places. Empty before the first frame,

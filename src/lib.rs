@@ -6,6 +6,7 @@
 //! the binary has a documented library target; the public surface is internal
 //! and not a stability guarantee.
 
+pub mod active;
 pub mod anim;
 pub mod app;
 pub mod collect;

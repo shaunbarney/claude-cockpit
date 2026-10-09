@@ -6,6 +6,7 @@
 
 pub mod cli;
 pub mod discover;
+pub mod host;
 pub mod model;
 pub mod overview;
 pub mod paths;
