@@ -22,6 +22,7 @@ pub mod refresh;
 pub mod render;
 pub mod rows;
 pub mod runloop;
+pub mod scope;
 pub mod theme;
 pub mod trend;
 pub mod util;

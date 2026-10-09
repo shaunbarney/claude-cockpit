@@ -270,14 +270,16 @@ fn draw_widget(
             let rows = pick(d.jobs, &vis);
             let flash = flash_for(d.jobs, &vis, kind, app, theme);
             with_state(app, kind, focused, |st| {
-                widgets::jobs::render(f, rect, &rows, ctx!(&flash), st, cx.now)
+                let title = crate::scope::jobs_title(crate::refresh::jobs_all());
+                widgets::jobs::render(f, rect, &rows, ctx!(&flash), st, cx.now, title)
             });
         }
         WidgetKind::Docker => {
             let rows = pick(d.containers, &vis);
             let flash = flash_for(d.containers, &vis, kind, app, theme);
             with_state(app, kind, focused, |st| {
-                widgets::docker::render(f, rect, &rows, ctx!(&flash), st)
+                let title = crate::scope::docker_title(crate::scope::docker_all());
+                widgets::docker::render(f, rect, &rows, ctx!(&flash), st, title)
             });
         }
         WidgetKind::Ports => {

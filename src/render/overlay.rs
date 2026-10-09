@@ -30,6 +30,7 @@ const HELP: &[Option<(&str, &str)>] = &[
     Some(("/", "filter rows as you type")),
     Some((": / ^K / ^P", "command palette")),
     Some(("s / S", "cycle sort column / reverse")),
+    Some(("a", "Jobs / Docker: this project ↔ all")),
     None,
     Some(("wheel", "scroll the widget under the pointer")),
     Some(("?", "toggle this help")),
