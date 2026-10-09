@@ -206,7 +206,7 @@ fn request_worktree_detail(app: &mut App, wt: crate::collect::git::Worktree) {
 const WT_DETAIL_TTL: Duration = Duration::from_secs(10);
 
 /// Re-read the open worktree detail after a data refresh, at most every
-/// [`WT_DETAIL_TTL`] — its `git` calls are too heavy for every 2 s jobs tick.
+/// `WT_DETAIL_TTL` — its `git` calls are too heavy for every 2 s jobs tick.
 pub fn refresh_worktree_detail(app: &mut App) {
     if !matches!(app.view, View::Detail(Detail::Worktree)) || app.loading {
         return;

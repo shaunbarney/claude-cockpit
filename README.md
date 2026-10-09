@@ -29,7 +29,7 @@ Drive it with the keyboard or the mouse: `/` filters any table as you type, `:` 
 | Widget | What it shows |
 |--------|---------------|
 | **Worktrees** | Every git worktree ranked ahead → dirty → clean, with committed/uncommitted churn and age. Drill in for the owning Claude job, changed files, an in-app diff, recent commits, and a merge-readiness verdict. |
-| **Jobs** | Live Claude Code background agents from `~/.claude/jobs/*/state.json` — state, tempo, in-flight tasks, intent, age, stuck-detection. Worktrees with no owning job show as `no agent` rows, so every worktree is accounted for. Drill in for the job's `timeline.jsonl` event feed. |
+| **Jobs** | Live Claude Code background agents from `~/.claude/jobs/*/state.json` that belong to **this project** (their worktree, working directory or launch directory is inside the repo) — state, tempo, in-flight tasks, intent, age. Blocked jobs read *needs input*; a working job that has gone quiet reads *stalled*. Worktrees with no owning job show as `no agent` rows, so every worktree is accounted for. Drill in for the job's `timeline.jsonl` event feed. |
 | **Cost** | Total / today / per-model token totals and **USD cost** from your transcripts (deduped by `message.id`), with a braille spend-trend and cache-hit %. Drill in for a per-day and per-model breakdown. |
 | **Rate** | Rate-limit proximity: a rolling **5-hour prompt** gauge (the unit the Claude Code subscription limit actually uses) vs your plan cap, an **OTPM** output-tokens-per-minute burn gauge, a reset countdown, and a token-rate sparkline. Set `plan` in config for a true %; otherwise it auto-scales to your busiest observed window. |
 | **Code** | Total lines by language (code + comments + blanks, à la `wc -l`; via `tokei`), counted over **git-tracked files only** (`git ls-files`) — so gitignored paths, build output, and sibling worktrees don't inflate it. Per-language icons, colours, and a size bar. |
@@ -55,10 +55,12 @@ cd claude-cockpit
 cargo install --path .
 ```
 
-Then, from inside any git repository:
+Then run it from inside any git repository — or register the repos you work on once and switch between them (see [Projects](#projects)):
 
 ```bash
-claude-cockpit
+claude-cockpit                      # the repo you're in
+claude-cockpit project add ~/code/api --pin
+claude-cockpit -p api               # open a registered project from anywhere
 ```
 
 ## Usage
@@ -71,6 +73,8 @@ claude-cockpit --code          # one-shot: worktrees + repo lines, stacked
 claude-cockpit --watch         # worktrees + repo lines side by side, refreshed in place
 claude-cockpit --watch --code  # …or watch any one-shot layout (--worktrees / --code)
 claude-cockpit --watch --interval 5   # …refreshing every 5s (default 10, minimum 0.5)
+claude-cockpit -p <name|path>  # open a registered project (works with the one-shot flags too)
+claude-cockpit project …       # manage projects — see Projects below
 claude-cockpit --help
 ```
 
@@ -95,6 +99,8 @@ claude-cockpit --help
 | `Enter` / click | Drill into the focused row (worktree · job · container · cost · ports · skill) |
 | `e` | Expand the focused widget to full screen |
 | `r` | Refresh now |
+| `P` | Project picker — switch, add and manage projects |
+| `1`–`9` | Switch to pinned project 1–9 |
 | `Esc` | Clear the filter, back out of a detail view, or close an overlay |
 | `q` / `Ctrl-C` | Quit |
 
@@ -110,6 +116,63 @@ claude-cockpit --help
 Filtering is fuzzy and searches more than the name column: a job matches on its state and intent, a container on its health and published ports. The footer shows the live match count, and the filter and sort in force.
 
 The mouse works too — click a widget to focus it, click a row to select it, and scroll to move the selection or a diff.
+
+## Projects
+
+The cockpit shows one project — a git repository and all of its worktrees — at a time. Register the repos you care about and switch between them without leaving the TUI.
+
+**In the TUI**, press `P` for the project picker:
+
+```
+╭ Projects · 2 registered · 3 suggested ──────────────────────────────────────────────────╮
+│    Project               Branch        Dirty  Trees  Jobs    Active  Last $   Path      │
+│▶1  ★ sovra               main          1      1      ◉1 ◐2   11s     $0.30    ~/work/…  │
+│    ● cockpit             main          1      6      —       2m      —        ~/claude… │
+│    + cognirouteslm       main          clean  —      —       6d      $0.00    ~/work/…  │
+╰ Enter open · 1-9 pinned · a add · n add path · d remove · p pin · r rename · t tags ────╯
+```
+
+| Key | In the picker |
+|-----|---------------|
+| `Enter` | Open the selected project |
+| `1`–`9` | Open a pinned project (also works straight from the dashboard) |
+| `a` | Add the selected suggestion as a project |
+| `n` | Add a repository by path (`Tab` completes directories; any path inside a repo works) |
+| `d` | Unregister a project (asks first; the repository itself is never touched), or hide a suggestion |
+| `p` / `r` / `t` | Pin, rename, edit tags (`+work -old`) |
+| `/` | Filter by name, path or tag |
+
+Each row shows the branch, dirty files, worktrees, running (◉) and blocked (◐) agents, the last Claude Code activity anywhere in the repo, and the cost of the last session started there. **Suggestions** (`+`, dimmed) are repos Claude Code has already worked in — read from `~/.claude.json` and the `cwd` recorded in your transcripts, with worktree sessions folded into their repo — so the list fills itself; nothing is added until you press `a`. The command palette (`:`) also offers *Switch to project …* for every registered project.
+
+**From the shell:**
+
+```bash
+claude-cockpit project add [PATH] [--name N] [--tag T]... [--pin]   # default: the repo you're in
+claude-cockpit project ls [--all] [--tag T] [--json]                # --all adds suggestions
+claude-cockpit project rm <name|path>
+claude-cockpit project rename <name> <new-name>
+claude-cockpit project pin|unpin <name>
+claude-cockpit project tag <name> +work -old
+claude-cockpit project discover [--add-all]                         # list (or register) suggestions
+claude-cockpit project hide <path>                                  # stop suggesting a repo
+claude-cockpit project prune                                        # drop projects whose folder is gone
+```
+
+**Which project opens:** `-p <name|path>` if given; else the repo you launched from (registered or not); else the project you had open last; else your first pinned project; else the picker.
+
+**Where it's stored:** your list is `$XDG_CONFIG_HOME/claude-cockpit/projects.toml` (default `~/.config/…`) — plain TOML with `~`-relative paths, safe to edit by hand or keep in your dotfiles. If it fails to parse, the cockpit refuses to write it rather than overwrite your list. What the cockpit remembers on its own (last project, recents, hidden suggestions) lives separately in `$XDG_STATE_HOME/claude-cockpit/state.toml` (default `~/.local/state/…`), so switching projects never rewrites the file you edit.
+
+```toml
+[discovery]
+claude_history = true                       # suggest repos from Claude Code history
+roots = [{ path = "~/code", depth = 2 }]    # also suggest git repos found under these folders
+
+[[project]]
+name = "sovra"
+path = "~/work/SovraSRXProduction"
+tags = ["work"]
+pinned = true
+```
 
 ## Configuration
 
@@ -178,14 +241,15 @@ See [`claude-cockpit.toml.example`](claude-cockpit.toml.example).
 Everything is read locally and best-effort — a missing tool or file just yields an empty widget, never a crash:
 
 - **Jobs** — `~/.claude/jobs/*/state.json`, `~/.claude/jobs/*/timeline.jsonl`
-- **Cost** — `~/.claude/projects/**/*.jsonl` (incrementally scanned, cached by mtime). Prices are a vendored Claude table, refreshed from [LiteLLM](https://github.com/BerriAI/litellm) when online and cached to `~/.claude/.cockpit-prices.json`.
-- **Rate** — output-token usage from those same transcripts (OTPM) + prompt timestamps from `~/.claude/history.jsonl` (the rolling 5-hour prompt window)
+- **Cost** — `~/.claude/projects/**/*.jsonl`, read incrementally (only bytes appended since the last scan). Streaming writes one line per content block with the same `message.id`, so usage is deduped by id **across all files**, keeping the final (largest) figures; 1-hour cache writes are priced at 2× input, 5-minute writes at 1.25×. Prices are a vendored Claude table, refreshed from [LiteLLM](https://github.com/BerriAI/litellm) when online and cached to `~/.claude/.cockpit-prices.json`.
+- **Rate** — output-token usage from those same transcripts (OTPM) + your prompts in them (human turns in main sessions; tool results, meta lines and local-only slash commands like `/model` don't count) for the rolling 5-hour window
 - **Code** — [`tokei`](https://github.com/XAMPPRocky/tokei) over `git ls-files` (git-tracked files only)
-- **Git / Worktrees** — `git` CLI in the current repo
+- **Git / Worktrees** — `git` CLI in the active project; ahead/behind and merge checks compare against `origin/<default branch>` (detected from `origin/HEAD`)
 - **Docker** — `docker ps` (with Compose labels) / `docker stats` / `docker logs`, each with a timeout so a hung daemon can't stall the cockpit
 - **Ports** — published ports of the repo's running containers, then the repo's default compose files; `lsof` (+ `ss` on Linux) for ownership; a TCP connect for health
-- **Tools** — `tool_use` blocks in `~/.claude/projects/**/*.jsonl` (deduped by `message.id`)
-- **Skills** — `SKILL.md` files in `~/.claude/skills`, `<repo>/.claude/skills`, and `~/.claude/plugins/**/skills`; usage from `Skill` tool-use blocks in the transcripts
+- **Tools** — `tool_use` blocks in `~/.claude/projects/**/*.jsonl`, deduped by `tool_use.id`
+- **Skills** — `SKILL.md` files in `~/.claude/skills` (including synced sub-folders), `<repo>/.claude/skills`, and the skills of plugins listed in `~/.claude/plugins/installed_plugins.json`, plus `.claude/commands`; usage from `Skill` tool-use blocks and typed `/commands`
+- **Projects** — `projects.toml` / `state.toml` (above); suggestions and per-project activity from `~/.claude.json` and transcript `cwd` fields
 
 > **v1 is read-only.** The cockpit inspects; it never kills a job, stops a container, or touches your branches.
 

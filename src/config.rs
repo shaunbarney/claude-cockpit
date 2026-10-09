@@ -278,9 +278,10 @@ mod tests {
         let readme = include_str!("../README.md");
         let block = readme
             .split("```toml\n")
-            .nth(1)
-            .and_then(|b| b.split("```").next())
-            .expect("README has a toml example");
+            .skip(1)
+            .filter_map(|b| b.split("```").next())
+            .find(|b| b.contains("[[endpoints]]"))
+            .expect("README has a config example");
         let (cfg, diags) = parse_with_diagnostics(block);
         assert!(diags.is_empty(), "{diags:?}");
         assert_eq!(cfg.endpoints.len(), 2);

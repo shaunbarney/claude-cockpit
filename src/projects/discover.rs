@@ -140,7 +140,7 @@ fn claude_json_dirs(path: &Path) -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-/// `~/.claude.json` → `githubRepoPaths` (`owner/repo` → [paths]) inverted to
+/// `~/.claude.json` → `githubRepoPaths` (`owner/repo` → list of paths) inverted to
 /// path → `repo`.
 pub fn github_names(path: &Path) -> HashMap<PathBuf, String> {
     let mut out = HashMap::new();

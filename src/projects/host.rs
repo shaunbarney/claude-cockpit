@@ -195,7 +195,7 @@ fn job_refs() -> Vec<JobRef> {
         .collect()
 }
 
-/// Regather overview rows every [`OVERVIEW_EVERY`], or at once when woken.
+/// Regather overview rows every `OVERVIEW_EVERY`, or at once when woken.
 pub fn spawn_overview(data: Arc<Mutex<DashboardData>>, stop: Arc<AtomicBool>) {
     thread::spawn(move || {
         let mut waited = Duration::ZERO;

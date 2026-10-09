@@ -63,7 +63,7 @@ fn install_panic_hook() {
 }
 
 /// Enter alt-screen + mouse capture, run the loop, restore on exit (including
-/// a panic on the UI thread — see [`install_panic_hook`]).
+/// a panic on the UI thread — see `install_panic_hook`).
 pub fn run(root: &str) -> io::Result<()> {
     let cfg = config::load_for(root);
     let mut term = ratatui::init();

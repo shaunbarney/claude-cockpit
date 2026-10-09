@@ -397,6 +397,21 @@ mod tests {
     }
 
     #[test]
+    fn readme_projects_example_parses() {
+        let readme = include_str!("../../README.md");
+        let block = readme
+            .split("```toml\n")
+            .skip(1)
+            .filter_map(|b| b.split("```").next())
+            .find(|b| b.contains("[[project]]"))
+            .expect("README has a projects example");
+        let reg: Registry = toml::from_str(block).unwrap();
+        assert_eq!(reg.projects.len(), 1);
+        assert!(reg.projects[0].pinned);
+        assert_eq!(reg.discovery.roots[0].depth, 2);
+    }
+
+    #[test]
     fn toml_round_trip_uses_tilde_paths() {
         let home = dirs::home_dir().unwrap();
         let mut r = Registry::default();
