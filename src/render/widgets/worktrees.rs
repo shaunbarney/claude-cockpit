@@ -37,21 +37,32 @@ fn level(r: &Worktree) -> Level {
     }
 }
 
-/// The name cell: bold name plus `✕ missing` / `locked` tags. A missing
-/// checkout is dimmed — its numbers are meaningless without a tree on disk.
-fn name_line(r: &Worktree, theme: &Theme) -> Line<'static> {
-    let name_style = if r.missing {
+/// The name cell: bold, or dimmed for a missing checkout whose numbers mean
+/// nothing without a tree on disk.
+fn name_span(r: &Worktree, theme: &Theme) -> Span<'static> {
+    let style = if r.missing {
         theme.dim_style()
     } else {
         Style::new().add_modifier(Modifier::BOLD)
     };
-    let mut spans = vec![Span::styled(r.name.clone(), name_style)];
+    Span::styled(r.name.clone(), style)
+}
+
+/// The age cell, which also carries the `✕ missing` / `locked` markers: a
+/// missing tree has no age, and the fixed-width age column never truncates
+/// them the way a long name column would.
+fn age_line(r: &Worktree, theme: &Theme) -> Line<'static> {
     if r.missing {
-        spans.push(Span::styled(" ✕ missing", Style::new().fg(theme.err)));
+        return Line::from(Span::styled("✕ missing", Style::new().fg(theme.err)));
     }
+    let mut spans = Vec::new();
     if r.locked {
-        spans.push(Span::styled(" locked", Style::new().fg(theme.warn)));
+        spans.push(Span::styled("locked", Style::new().fg(theme.warn)));
+        if !r.age.is_empty() {
+            spans.push(Span::styled(" · ", theme.dim_style()));
+        }
     }
+    spans.push(Span::styled(r.age.clone(), theme.dim_style()));
     Line::from(spans)
 }
 
@@ -140,8 +151,8 @@ pub fn render(
                 Span::styled("0", theme.dim_style())
             };
 
-            let age_span = Span::styled(r.age.clone(), theme.dim_style());
-            let name_span = name_line(r, theme);
+            let age_span = age_line(r, theme);
+            let name_span = name_span(r, theme);
 
             let row = if compact {
                 Row::new(vec![
@@ -208,21 +219,16 @@ mod tests {
     #[test]
     fn missing_and_locked_worktrees_are_tagged() {
         let theme = Theme::default();
+        let text =
+            |l: Line<'static>| -> String { l.spans.iter().map(|s| s.content.as_ref()).collect() };
         let mut gone = wt(0, 0);
         gone.missing = true;
         gone.locked = true;
         assert_eq!(level(&gone), Level::Err);
-        let text: String = name_line(&gone, &theme)
-            .spans
-            .iter()
-            .map(|s| s.content.as_ref())
-            .collect();
-        assert_eq!(text, "w ✕ missing locked");
-        let plain: String = name_line(&wt(0, 0), &theme)
-            .spans
-            .iter()
-            .map(|s| s.content.as_ref())
-            .collect();
-        assert_eq!(plain, "w");
+        assert_eq!(text(age_line(&gone, &theme)), "✕ missing");
+        let mut locked = wt(0, 0);
+        locked.locked = true;
+        assert_eq!(text(age_line(&locked, &theme)), "locked · 1d");
+        assert_eq!(text(age_line(&wt(0, 0), &theme)), "1d");
     }
 }
