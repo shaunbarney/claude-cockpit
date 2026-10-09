@@ -18,7 +18,8 @@ fn source_style(source: &str, theme: &Theme) -> (&'static str, Color) {
         "personal" => ("personal", theme.accent),
         "project" => ("project", theme.ok),
         "plugin" => ("plugin", theme.warn),
-        _ => ("used", theme.dim), // invoked but not found on disk
+        "command" => ("command", theme.ok),
+        _ => ("built-in", theme.dim), // invoked but not on disk (bundled, or another project)
     }
 }
 

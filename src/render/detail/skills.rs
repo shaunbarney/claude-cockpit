@@ -26,13 +26,17 @@ pub fn render(f: &mut Frame, area: Rect, skill: Option<&Skill>, theme: &Theme, s
     let last = s
         .last_used
         .and_then(chrono::DateTime::from_timestamp_millis)
-        .map(|dt| dt.format("%Y-%m-%d %H:%M UTC").to_string())
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
         .unwrap_or_else(|| "never".into());
     let path = s
         .path
         .as_ref()
         .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "(invoked from another project — not on disk here)".into());
+        .unwrap_or_else(|| "(built-in / not on disk)".into());
 
     let header = Text::from(vec![
         Line::from(vec![Span::styled(

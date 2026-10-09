@@ -1,19 +1,24 @@
 //! Claude Code skills: discovered from disk (personal, project, and plugin
-//! `SKILL.md` files) and ranked by how often they've actually been invoked
-//! (parsed from `Skill` tool-use blocks in the session transcripts).
+//! `SKILL.md` files, plus custom slash commands) and ranked by how often
+//! they've actually been invoked — `Skill` tool-use blocks and typed
+//! `/name` commands in the session transcripts.
 
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde_json::Value;
+
+use crate::collect::usage::{parse_ts, transcript_files, TailCache};
+
+mod discover;
+pub use discover::discover;
 
 /// One skill: its identity, where it came from, and how much it's been used.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Skill {
     pub name: String,
     pub description: String,
-    pub source: String, // "personal" | "project" | "plugin" | "used"
+    pub source: String, // "personal" | "project" | "command" | "plugin" | "used"
     pub path: Option<PathBuf>,
     pub uses: u64,
     pub last_used: Option<i64>,
@@ -68,176 +73,177 @@ pub fn parse_frontmatter(md: &str, fallback_name: &str) -> (String, String) {
     (name, description)
 }
 
-fn skill_from_file(path: &Path, source: &str) -> Option<Skill> {
-    let md = std::fs::read_to_string(path).ok()?;
-    let fallback = path
-        .parent()
-        .and_then(|p| p.file_name())
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let (name, description) = parse_frontmatter(&md, &fallback);
-    if name.is_empty() {
-        return None;
-    }
-    Some(Skill {
-        name,
-        description,
-        source: source.to_string(),
-        path: Some(path.to_path_buf()),
-        uses: 0,
-        last_used: None,
-    })
+/// Invocations seen in one transcript, keyed for dedupe.
+#[derive(Debug, Default)]
+pub struct SkillEvents {
+    /// `Skill` tool_use id -> (skill name, ts ms).
+    tool: HashMap<String, (String, i64)>,
+    /// user-line uuid -> (typed `/command` name, ts ms).
+    typed: HashMap<String, (String, i64)>,
 }
 
-/// Collect `<dir>/*/SKILL.md` skills with the given source label.
-fn scan_skill_dir(dir: &Path, source: &str, out: &mut Vec<Skill>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for e in entries.flatten() {
-        let p = e.path().join("SKILL.md");
-        if p.is_file() {
-            if let Some(s) = skill_from_file(&p, source) {
-                out.push(s);
-            }
+/// `Skill` tool_use blocks on an assistant line, as `(dedupe key, skill)`.
+/// Every streamed line is scanned (a turn's tool_use blocks arrive on later
+/// copies than its first), and calls are keyed by `tool_use.id` so parallel
+/// Skill calls in one turn are each counted once.
+fn skill_tool_uses(v: &Value) -> Vec<(String, String)> {
+    let msg = v.get("message");
+    let msg_id = msg
+        .and_then(|m| m.get("id"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let blocks = msg.and_then(|m| m.get("content")).and_then(Value::as_array);
+    let mut out = Vec::new();
+    for (i, b) in blocks.into_iter().flatten().enumerate() {
+        if b.get("type").and_then(Value::as_str) != Some("tool_use")
+            || b.get("name").and_then(Value::as_str) != Some("Skill")
+        {
+            continue;
         }
+        let Some(skill) = b
+            .get("input")
+            .and_then(|inp| inp.get("skill"))
+            .and_then(Value::as_str)
+        else {
+            continue;
+        };
+        let key = b
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{msg_id}#{i}"));
+        out.push((key, skill.trim_start_matches('/').to_string()));
     }
-}
-
-/// Recursively find plugin `SKILL.md` files under `dir` (bounded depth).
-fn scan_plugin_skills(dir: &Path, depth: usize, out: &mut Vec<Skill>) {
-    if depth == 0 {
-        return;
-    }
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for e in entries.flatten() {
-        let p = e.path();
-        if p.is_dir() {
-            scan_plugin_skills(&p, depth - 1, out);
-        } else if p.file_name().map(|n| n == "SKILL.md").unwrap_or(false) {
-            if let Some(s) = skill_from_file(&p, "plugin") {
-                out.push(s);
-            }
-        }
-    }
-}
-
-/// Discover skills on disk: personal (`~/.claude/skills`), project
-/// (`<root>/.claude/skills`), then plugin (`~/.claude/plugins/**/skills`).
-/// Deduped by name, earlier sources winning.
-pub fn discover(root: &str) -> Vec<Skill> {
-    let mut out: Vec<Skill> = Vec::new();
-    if let Some(home) = crate::util::claude_home() {
-        scan_skill_dir(&home.join("skills"), "personal", &mut out);
-        scan_plugin_skills(&home.join("plugins"), 10, &mut out);
-    }
-    scan_skill_dir(&Path::new(root).join(".claude/skills"), "project", &mut out);
-
-    let mut seen = HashSet::new();
-    out.retain(|s| seen.insert(s.name.clone()));
     out
 }
 
-/// Parse deduped `(skill_name, ts_ms)` invocations from one session — `Skill`
-/// tool-use blocks, read via `input.skill`.
-///
-/// An assistant turn is logged repeatedly while streaming, and the *first* copy
-/// often predates the `tool_use` block — so we key by `message.id` and keep the
-/// **last non-empty** occurrence (the finalized turn). Keying on the first copy
-/// (as a naive dedupe would) misses the call entirely.
-pub fn parse_skill_uses(jsonl: &str) -> Vec<(String, i64)> {
-    let mut by_id: HashMap<String, Vec<(String, i64)>> = HashMap::new();
+/// Fold newly appended transcript lines into one file's invocation state.
+fn parse_into(st: &mut SkillEvents, jsonl: &str) {
     for line in jsonl.lines() {
+        let is_tool = line.contains("\"Skill\"");
+        let is_cmd = line.contains("<command-name>");
+        if !is_tool && !is_cmd {
+            continue;
+        }
         let Ok(v) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        if v.get("type").and_then(|x| x.as_str()) != Some("assistant") {
-            continue;
-        }
-        let Some(msg) = v.get("message") else {
-            continue;
-        };
-        let id = msg.get("id").and_then(|x| x.as_str()).unwrap_or("");
-        if id.is_empty() {
-            continue;
-        }
-        let ts = v
-            .get("timestamp")
-            .and_then(|x| x.as_str())
-            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-            .map(|d| d.timestamp_millis())
-            .unwrap_or(0);
-        let Some(content) = msg.get("content").and_then(|c| c.as_array()) else {
-            continue;
-        };
-        let mut skills = Vec::new();
-        for block in content {
-            if block.get("type").and_then(|x| x.as_str()) == Some("tool_use")
-                && block.get("name").and_then(|x| x.as_str()) == Some("Skill")
-            {
-                if let Some(skill) = block
-                    .get("input")
-                    .and_then(|inp| inp.get("skill"))
-                    .and_then(|x| x.as_str())
-                {
-                    skills.push((skill.to_string(), ts));
+        let ts = parse_ts(&v).unwrap_or(0);
+        match v.get("type").and_then(Value::as_str) {
+            Some("assistant") if is_tool => {
+                for (key, skill) in skill_tool_uses(&v) {
+                    st.tool.entry(key).or_insert((skill, ts));
                 }
             }
-        }
-        // Overwrite only when this copy has the block, so a trailing partial
-        // can't erase the finalized one.
-        if !skills.is_empty() {
-            by_id.insert(id.to_string(), skills);
+            Some("user") if is_cmd => {
+                let text = v
+                    .get("message")
+                    .and_then(|m| m.get("content"))
+                    .and_then(crate::collect::activity::user_text);
+                let name = text
+                    .as_deref()
+                    .and_then(crate::collect::activity::command_name)
+                    .filter(|n| !crate::collect::activity::is_local_command(n))
+                    .map(str::to_string);
+                if let (Some(uuid), Some(name)) = (v.get("uuid").and_then(Value::as_str), name) {
+                    st.typed.entry(uuid.to_string()).or_insert((name, ts));
+                }
+            }
+            _ => {}
         }
     }
-    by_id.into_values().flatten().collect()
 }
 
-/// Per-file cache: path -> (mtime, len, parsed skill-use events).
-pub type SkillCache = HashMap<PathBuf, (SystemTime, u64, Vec<(String, i64)>)>;
+/// Parse deduped `(skill_name, ts_ms)` `Skill`-tool invocations from one session.
+pub fn parse_skill_uses(jsonl: &str) -> Vec<(String, i64)> {
+    let mut st = SkillEvents::default();
+    parse_into(&mut st, jsonl);
+    st.tool.into_values().collect()
+}
+
+/// Per-file incremental cache of parsed skill invocations.
+#[derive(Debug, Default)]
+pub struct SkillCache {
+    files: TailCache<SkillEvents>,
+}
+
+impl SkillCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+/// Map an invoked name onto a discovered skill's key. Exact match first; a
+/// namespaced `ns:name` with no exact match falls back to a non-plugin skill
+/// called `name` (e.g. synced skills invoked as `anthropic-skills:pdf`).
+fn resolve<'a>(name: &'a str, skills: &'a [Skill]) -> Option<&'a str> {
+    if let Some(s) = skills.iter().find(|s| s.name == name) {
+        return Some(&s.name);
+    }
+    let (_, bare) = name.split_once(':')?;
+    skills
+        .iter()
+        .find(|s| s.source != "plugin" && s.name == bare)
+        .map(|s| s.name.as_str())
+}
+
+/// Tally `(uses, last_ts)` per skill key from deduped tool + typed events.
+/// Typed `/x` commands only count when `x` is a known skill/command (on disk
+/// or seen via the Skill tool), so built-ins like `/goal` don't appear.
+fn tally(
+    tool: &HashMap<String, (String, i64)>,
+    typed: &HashMap<String, (String, i64)>,
+    skills: &[Skill],
+) -> HashMap<String, (u64, i64)> {
+    let mut counts: HashMap<String, (u64, i64)> = HashMap::new();
+    let mut bump = |key: String, ts: i64| {
+        let e = counts.entry(key).or_insert((0, 0));
+        e.0 += 1;
+        e.1 = e.1.max(ts);
+    };
+    let tool_names: std::collections::HashSet<&str> =
+        tool.values().map(|(n, _)| n.as_str()).collect();
+    for (name, ts) in tool.values() {
+        bump(resolve(name, skills).unwrap_or(name).to_string(), *ts);
+    }
+    for (name, ts) in typed.values() {
+        if let Some(key) = resolve(name, skills) {
+            bump(key.to_string(), *ts);
+        } else if tool_names.contains(name.as_str()) {
+            bump(name.clone(), *ts);
+        }
+    }
+    counts
+}
 
 /// Discover skills and merge in invocation counts from the transcripts.
-/// Sorted by uses desc, then name. Skills invoked but not found on disk are
-/// appended with source `"used"`.
+/// Sorted by uses desc, then name. Skills invoked but not found on disk
+/// (built-in/bundled, or from another project) are appended with source `"used"`.
 pub fn scan_skills(cache: &mut SkillCache, root: &str) -> Vec<Skill> {
     let mut skills = discover(root);
 
-    // Tally usage across transcripts (re-reading only changed files).
-    let mut counts: HashMap<String, (u64, i64)> = HashMap::new();
-    if let Some(home) = crate::util::claude_home() {
-        let mut files = Vec::new();
-        crate::collect::usage::collect_jsonl(&home.join("projects"), &mut files);
-        for path in &files {
-            let (mtime, len) = std::fs::metadata(path)
-                .map(|m| (m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.len()))
-                .unwrap_or((SystemTime::UNIX_EPOCH, 0));
-            let fresh = match cache.get(path) {
-                Some((mt, l, _)) => *mt != mtime || *l != len,
-                None => true,
-            };
-            if fresh {
-                let txt = std::fs::read_to_string(path).unwrap_or_default();
-                cache.insert(path.clone(), (mtime, len, parse_skill_uses(&txt)));
-            }
-            if let Some((_, _, ev)) = cache.get(path) {
-                for (name, ts) in ev {
-                    let e = counts.entry(name.clone()).or_insert((0, 0));
-                    e.0 += 1;
-                    e.1 = e.1.max(*ts);
-                }
-            }
+    cache
+        .files
+        .update(&transcript_files(), |_, st, txt| parse_into(st, txt));
+    // Dedupe globally: resumed sessions copy earlier lines into new files.
+    let mut tool: HashMap<String, (String, i64)> = HashMap::new();
+    let mut typed: HashMap<String, (String, i64)> = HashMap::new();
+    for st in cache.files.states() {
+        for (k, v) in &st.tool {
+            tool.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+        for (k, v) in &st.typed {
+            typed.entry(k.clone()).or_insert_with(|| v.clone());
         }
     }
+    let mut counts = tally(&tool, &typed, &skills);
 
     for s in &mut skills {
         if let Some((uses, last)) = counts.remove(&s.name) {
             s.uses = uses;
-            s.last_used = if last > 0 { Some(last) } else { None };
+            s.last_used = (last > 0).then_some(last);
         }
     }
-    // Invoked but not discovered on disk (e.g. a skill from another project).
     for (name, (uses, last)) in counts {
         skills.push(Skill {
             name,
@@ -245,14 +251,14 @@ pub fn scan_skills(cache: &mut SkillCache, root: &str) -> Vec<Skill> {
             source: "used".into(),
             path: None,
             uses,
-            last_used: if last > 0 { Some(last) } else { None },
+            last_used: (last > 0).then_some(last),
         });
     }
 
-    // Keep the user's own skills (personal/project) always; show plugin skills
-    // only once actually used — the marketplaces ship dozens that would
-    // otherwise bury everything in zero-use noise.
-    skills.retain(|s| s.uses > 0 || s.source == "personal" || s.source == "project");
+    // Keep the user's own skills/commands always; show plugin skills only once
+    // actually used — marketplaces ship dozens that would bury everything.
+    skills
+        .retain(|s| s.uses > 0 || matches!(s.source.as_str(), "personal" | "project" | "command"));
     skills.sort_by(|a, b| b.uses.cmp(&a.uses).then_with(|| a.name.cmp(&b.name)));
     skills
 }
@@ -287,14 +293,56 @@ mod tests {
     #[test]
     fn parses_skill_invocations() {
         let jsonl = [
-            r#"{"type":"assistant","timestamp":"2026-06-24T10:00:00Z","message":{"id":"m1","content":[{"type":"tool_use","name":"Skill","input":{"skill":"deploy"}}]}}"#,
-            r#"{"type":"assistant","timestamp":"2026-06-24T10:00:00Z","message":{"id":"m1","content":[{"type":"tool_use","name":"Skill","input":{"skill":"deploy"}}]}}"#, // dupe
-            r#"{"type":"assistant","timestamp":"2026-06-24T10:01:00Z","message":{"id":"m2","content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}"#,
+            r#"{"type":"assistant","timestamp":"2026-06-24T10:00:00Z","message":{"id":"m1","content":[{"type":"text","text":"loading"}]}}"#,
+            r#"{"type":"assistant","timestamp":"2026-06-24T10:00:00Z","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"deploy"}}]}}"#,
+            r#"{"type":"assistant","timestamp":"2026-06-24T10:00:00Z","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"deploy"}}]}}"#, // dupe
+            r#"{"type":"assistant","timestamp":"2026-06-24T10:01:00Z","message":{"id":"m2","content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"ls"}}]}}"#,
         ]
         .join("\n");
         let ev = parse_skill_uses(&jsonl);
-        // Deduped by message.id → one "deploy"; the Bash call is ignored.
+        // Deduped by tool_use.id → one "deploy"; the Bash call is ignored.
         assert_eq!(ev.len(), 1);
         assert_eq!(ev[0].0, "deploy");
+    }
+
+    #[test]
+    fn parallel_skill_calls_each_count() {
+        let line = r#"{"type":"assistant","timestamp":"2026-06-24T10:00:00Z","message":{"id":"m1","content":[{"type":"tool_use","id":"a","name":"Skill","input":{"skill":"x"}},{"type":"tool_use","id":"b","name":"Skill","input":{"skill":"x"}}]}}"#;
+        assert_eq!(parse_skill_uses(line).len(), 2);
+    }
+
+    fn skill(name: &str, source: &str) -> Skill {
+        Skill {
+            name: name.into(),
+            description: String::new(),
+            source: source.into(),
+            path: None,
+            uses: 0,
+            last_used: None,
+        }
+    }
+
+    #[test]
+    fn tallies_namespaced_and_typed_invocations() {
+        let jsonl = [
+            r#"{"type":"assistant","timestamp":"2026-06-24T10:00:00Z","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"toolkit:review"}}]}}"#,
+            r#"{"type":"assistant","timestamp":"2026-06-24T10:00:00Z","message":{"id":"m2","content":[{"type":"tool_use","id":"t2","name":"Skill","input":{"skill":"anthropic-skills:pdf"}}]}}"#,
+            r#"{"type":"user","uuid":"u1","timestamp":"2026-06-24T11:00:00Z","message":{"role":"user","content":"<command-name>/deploy</command-name>"}}"#,
+            r#"{"type":"user","uuid":"u2","timestamp":"2026-06-24T11:00:00Z","message":{"role":"user","content":"<command-name>/goal</command-name>"}}"#,
+            r#"{"type":"user","uuid":"u3","timestamp":"2026-06-24T11:00:00Z","message":{"role":"user","content":"<command-name>/model</command-name>"}}"#,
+        ]
+        .join("\n");
+        let mut st = SkillEvents::default();
+        parse_into(&mut st, &jsonl);
+        let skills = vec![
+            skill("deploy", "personal"),
+            skill("pdf", "personal"),
+            skill("toolkit:review", "plugin"),
+        ];
+        let c = tally(&st.tool, &st.typed, &skills);
+        assert_eq!(c.get("toolkit:review").map(|x| x.0), Some(1));
+        assert_eq!(c.get("pdf").map(|x| x.0), Some(1)); // ns stripped onto personal
+        assert_eq!(c.get("deploy").map(|x| x.0), Some(1)); // typed slash command
+        assert!(!c.contains_key("goal") && !c.contains_key("model"));
     }
 }
