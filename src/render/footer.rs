@@ -57,6 +57,7 @@ pub fn hints(app: &App) -> Vec<(&'static str, &'static str)> {
             ("Enter", "open"),
             ("/", "filter"),
             (":", "commands"),
+            ("P", "projects"),
             ("s", "sort"),
             ("e", "expand"),
             ("r", "refresh"),

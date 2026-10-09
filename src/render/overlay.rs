@@ -26,6 +26,8 @@ const HELP: &[Option<(&str, &str)>] = &[
     Some(("e", "expand the focused widget")),
     Some(("Esc", "back, or clear the filter")),
     Some(("r", "refresh now")),
+    Some(("P", "projects: switch, add, manage")),
+    Some(("1 – 9", "switch to a pinned project")),
     None,
     Some(("/", "filter rows as you type")),
     Some((": / ^K / ^P", "command palette")),
