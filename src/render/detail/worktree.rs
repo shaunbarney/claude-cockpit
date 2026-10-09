@@ -253,6 +253,7 @@ mod tests {
             worktree_branch: Some("main".into()),
             created_at: None,
             updated_at: None,
+            ..Default::default()
         }
     }
 
