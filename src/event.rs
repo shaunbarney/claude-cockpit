@@ -151,20 +151,18 @@ fn jump_selection(app: &mut App, to_end: bool) {
 }
 
 /// Combined file list in render order: uncommitted (staged then unstaged) THEN committed.
-fn combined_files(d: &git_detail::WorktreeDetail) -> Vec<(String, DiffMode)> {
-    let mut v: Vec<(String, DiffMode)> = Vec::new();
+fn combined_files(d: &git_detail::WorktreeDetail) -> Vec<(String, Option<String>, DiffMode)> {
+    let mut v = Vec::new();
     for f in &d.uncommitted_files {
-        v.push((
-            f.path.clone(),
-            if f.staged {
-                DiffMode::Staged
-            } else {
-                DiffMode::Unstaged
-            },
-        ));
+        let mode = if f.staged {
+            DiffMode::Staged
+        } else {
+            DiffMode::Unstaged
+        };
+        v.push((f.path.clone(), f.old_path.clone(), mode));
     }
     for f in &d.committed_files {
-        v.push((f.path.clone(), DiffMode::Committed));
+        v.push((f.path.clone(), f.old_path.clone(), DiffMode::Committed));
     }
     v
 }
@@ -290,7 +288,7 @@ fn open_file_diff(app: &mut App) {
         return;
     };
     let files = combined_files(&detail);
-    let Some((path, mode)) = files.get(sel).cloned() else {
+    let Some((path, old_path, mode)) = files.get(sel).cloned() else {
         return;
     };
     let label = match mode {
@@ -298,7 +296,10 @@ fn open_file_diff(app: &mut App) {
         DiffMode::Unstaged => "unstaged",
         DiffMode::Committed => "committed",
     };
-    let title = format!("{path} · {label}");
+    let title = match &old_path {
+        Some(old) => format!("{old} → {path} · {label}"),
+        None => format!("{path} · {label}"),
+    };
     app.open_detail(Detail::Diff(DiffView {
         title: title.clone(),
         lines: Vec::new(),
@@ -309,7 +310,7 @@ fn open_file_diff(app: &mut App) {
         token,
         view: DiffView {
             title,
-            lines: git_detail::file_diff(&root, &path, mode),
+            lines: git_detail::file_diff_paths(&root, &path, old_path.as_deref(), mode),
             loading: false,
         },
     });
