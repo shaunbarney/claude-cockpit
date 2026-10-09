@@ -261,6 +261,7 @@ mod tests {
             committed: (0, 0),
             uncommitted: (0, 0),
             age: String::new(),
+            ..Default::default()
         }
     }
 
