@@ -33,6 +33,18 @@ pub trait TableRow {
     fn compare(a: &Self, b: &Self, col: usize) -> Ordering;
 }
 
+/// Coarse latency band for change detection.
+fn latency_bucket(ms: Option<u64>) -> &'static str {
+    match ms {
+        None => "-",
+        Some(0..=9) => "<10",
+        Some(10..=49) => "<50",
+        Some(50..=199) => "<200",
+        Some(200..=999) => "<1s",
+        Some(_) => "slow",
+    }
+}
+
 /// Total order over `f32`, treating NaN as smallest. `f32::total_cmp` would
 /// order -0.0 before 0.0, which is noise in a CPU column.
 fn cmp_f32(a: f32, b: f32) -> Ordering {
@@ -44,7 +56,12 @@ impl TableRow for Worktree {
         self.path.clone()
     }
     fn sig(&self) -> String {
-        format!("{}|{}|{}|{}", self.branch, self.ahead, self.dirty, self.age)
+        // No age: it is a relative string ("3m") that ticks over on its own and
+        // would keep the row flashing with nothing actually changed.
+        format!(
+            "{}|{}|{}|{:?}|{:?}",
+            self.branch, self.ahead, self.dirty, self.committed, self.uncommitted
+        )
     }
     fn search(&self) -> String {
         format!("{} {} {}", self.name, self.branch, self.path)
@@ -68,17 +85,25 @@ impl TableRow for Job {
     }
     fn sig(&self) -> String {
         format!(
-            "{}|{}|{}|{}|{:?}",
-            self.state, self.tempo, self.tasks, self.queued, self.updated_at
+            "{}|{}|{}|{}|{:?}|{}|{:?}",
+            self.state,
+            self.tempo,
+            self.tasks,
+            self.queued,
+            self.updated_at,
+            self.intent,
+            self.worktree_path
         )
     }
     fn search(&self) -> String {
+        // Include the worktree folder: it is what the Worktree column shows.
         format!(
-            "{} {} {} {}",
+            "{} {} {} {} {}",
             self.name,
             self.state,
             self.intent,
-            self.worktree_branch.as_deref().unwrap_or("")
+            self.worktree_branch.as_deref().unwrap_or(""),
+            crate::util::worktree_label(None, self.worktree_path.as_deref())
         )
     }
     fn sort_columns() -> &'static [&'static str] {
@@ -138,7 +163,9 @@ impl TableRow for Endpoint {
         format!("{}:{}", self.host, self.port)
     }
     fn sig(&self) -> String {
-        format!("{}|{:?}", self.up, self.latency_ms)
+        // Raw latency jitters by a millisecond or two every probe; only a move
+        // between coarse buckets is a change worth flashing.
+        format!("{}|{}", self.up, latency_bucket(self.latency_ms))
     }
     fn search(&self) -> String {
         format!("{} {} {}", self.label, self.host, self.port)
@@ -323,6 +350,31 @@ mod tests {
         b.dirty = 3;
         assert_eq!(a.key(), b.key(), "identity must survive a state change");
         assert_ne!(a.sig(), b.sig());
+    }
+
+    #[test]
+    fn worktree_sig_ignores_age_but_tracks_churn() {
+        let a = wt("x", 0, 0);
+        let mut b = a.clone();
+        b.age = "2d".into();
+        assert_eq!(a.sig(), b.sig(), "a ticking age is not a change");
+        b.uncommitted = (4, 1);
+        assert_ne!(a.sig(), b.sig());
+    }
+
+    #[test]
+    fn endpoint_sig_ignores_latency_jitter() {
+        let ep = |lat: Option<u64>| Endpoint {
+            label: "api".into(),
+            host: "127.0.0.1".into(),
+            port: 80,
+            up: lat.is_some(),
+            latency_ms: lat,
+            pid: None,
+        };
+        assert_eq!(ep(Some(3)).sig(), ep(Some(5)).sig());
+        assert_ne!(ep(Some(3)).sig(), ep(Some(300)).sig());
+        assert_ne!(ep(Some(3)).sig(), ep(None).sig());
     }
 
     #[test]
