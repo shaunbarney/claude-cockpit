@@ -2,7 +2,7 @@
 
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::Span;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
 use ratatui::Frame;
 
@@ -26,13 +26,33 @@ fn churn(pair: (u32, u32), show: bool, theme: &Theme) -> Span<'static> {
 /// pushed — this counts against the base, not the upstream), so they are
 /// informational, never an error.
 fn level(r: &Worktree) -> Level {
-    if r.dirty > 0 {
+    if r.missing {
+        Level::Err
+    } else if r.dirty > 0 {
         Level::Warn
     } else if r.ahead > 0 {
         Level::Info
     } else {
         Level::Ok
     }
+}
+
+/// The name cell: bold name plus `✕ missing` / `locked` tags. A missing
+/// checkout is dimmed — its numbers are meaningless without a tree on disk.
+fn name_line(r: &Worktree, theme: &Theme) -> Line<'static> {
+    let name_style = if r.missing {
+        theme.dim_style()
+    } else {
+        Style::new().add_modifier(Modifier::BOLD)
+    };
+    let mut spans = vec![Span::styled(r.name.clone(), name_style)];
+    if r.missing {
+        spans.push(Span::styled(" ✕ missing", Style::new().fg(theme.err)));
+    }
+    if r.locked {
+        spans.push(Span::styled(" locked", Style::new().fg(theme.warn)));
+    }
+    Line::from(spans)
 }
 
 /// Render the Worktrees table into `area`.
@@ -121,9 +141,9 @@ pub fn render(
             };
 
             let age_span = Span::styled(r.age.clone(), theme.dim_style());
-            let name_span = Span::styled(r.name.clone(), Style::new().add_modifier(Modifier::BOLD));
+            let name_span = name_line(r, theme);
 
-            if compact {
+            let row = if compact {
                 Row::new(vec![
                     Cell::from(theme.level_span(level)),
                     Cell::from(name_span),
@@ -141,6 +161,11 @@ pub fn render(
                     Cell::from(churn(r.uncommitted, r.dirty > 0, theme)),
                     Cell::from(age_span),
                 ])
+            };
+            if r.missing {
+                row.style(theme.dim_style())
+            } else {
+                row
             }
         })
         .collect();
@@ -178,5 +203,26 @@ mod tests {
         assert_eq!(level(&wt(3, 0)), Level::Info);
         assert_eq!(level(&wt(3, 2)), Level::Warn);
         assert_eq!(level(&wt(0, 0)), Level::Ok);
+    }
+
+    #[test]
+    fn missing_and_locked_worktrees_are_tagged() {
+        let theme = Theme::default();
+        let mut gone = wt(0, 0);
+        gone.missing = true;
+        gone.locked = true;
+        assert_eq!(level(&gone), Level::Err);
+        let text: String = name_line(&gone, &theme)
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert_eq!(text, "w ✕ missing locked");
+        let plain: String = name_line(&wt(0, 0), &theme)
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert_eq!(plain, "w");
     }
 }

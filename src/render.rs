@@ -65,6 +65,23 @@ fn churn_cell(pair: (u32, u32), show: bool) -> Cell {
     Cell::new(format!("+{}/-{}", pair.0, pair.1)).fg(Color::Green)
 }
 
+/// The bold worktree name, tagged `✕ missing` / `locked` when relevant.
+fn name_cell(r: &Worktree) -> Cell {
+    let mut name = r.name.clone();
+    if r.missing {
+        name.push_str(" ✕ missing");
+    }
+    if r.locked {
+        name.push_str(" locked");
+    }
+    let cell = Cell::new(name);
+    if r.missing {
+        cell.fg(Color::DarkGrey)
+    } else {
+        cell.add_attribute(Attribute::Bold)
+    }
+}
+
 /// Build the Worktrees table.
 pub fn worktree_table(rows: &[Worktree]) -> Table {
     let mut t = Table::new();
@@ -92,7 +109,12 @@ pub fn worktree_table(rows: &[Worktree]) -> Table {
     ]);
 
     for r in rows {
-        let (dot, ahead_cell) = if r.ahead > 0 {
+        let (dot, ahead_cell) = if r.missing {
+            (
+                Cell::new("✕").fg(Color::Red),
+                Cell::new("—").fg(Color::DarkGrey),
+            )
+        } else if r.ahead > 0 {
             (
                 Cell::new("●").fg(Color::Red),
                 Cell::new(r.ahead)
@@ -117,7 +139,7 @@ pub fn worktree_table(rows: &[Worktree]) -> Table {
         };
         t.add_row(vec![
             dot.set_alignment(CellAlignment::Center),
-            Cell::new(&r.name).add_attribute(Attribute::Bold),
+            name_cell(r),
             ahead_cell.set_alignment(CellAlignment::Right),
             dirty_cell.set_alignment(CellAlignment::Right),
             churn_cell(r.committed, r.ahead > 0).set_alignment(CellAlignment::Right),
@@ -141,27 +163,51 @@ pub enum Mode {
     Side,
 }
 
+/// Worktree counts for the summary line. `unmerged` and `dirty` overlap: a
+/// tree with commits ahead *and* uncommitted changes counts in both.
+#[derive(Debug, PartialEq, Eq)]
+struct Counts {
+    unmerged: usize,
+    dirty: usize,
+    clean: usize,
+    missing: usize,
+}
+
+fn counts(rows: &[Worktree]) -> Counts {
+    let live = || rows.iter().filter(|r| !r.missing);
+    Counts {
+        unmerged: live().filter(|r| r.ahead > 0).count(),
+        dirty: live().filter(|r| r.dirty > 0).count(),
+        clean: live().filter(|r| r.ahead == 0 && r.dirty == 0).count(),
+        missing: rows.iter().filter(|r| r.missing).count(),
+    }
+}
+
 /// The bottom summary line. `note` (may be empty) is appended dim.
 pub fn summary_line(rows: &[Worktree], note: &str) -> String {
-    let unmerged = rows.iter().filter(|r| r.ahead > 0).count();
-    let dirty = rows.iter().filter(|r| r.ahead == 0 && r.dirty > 0).count();
-    let clean = rows.len() - unmerged - dirty;
+    let c = counts(rows);
     let mut s = format!("  {}", style(format!("{} worktrees", rows.len())).bold());
     s.push_str(&format!(
         "   {} {}",
         style("●").red(),
-        style(format!("{unmerged} unmerged")).red()
+        style(format!("{} unmerged", c.unmerged)).red()
     ));
     s.push_str(&format!(
         "   {} {}",
         style("●").yellow(),
-        style(format!("{dirty} dirty")).yellow()
+        style(format!("{} dirty", c.dirty)).yellow()
     ));
     s.push_str(&format!(
         "   {} {}",
         style("●").green(),
-        style(format!("{clean} clean")).green()
+        style(format!("{} clean", c.clean)).green()
     ));
+    if c.missing > 0 {
+        s.push_str(&format!(
+            "   {}",
+            style(format!("✕ {} missing", c.missing)).red()
+        ));
+    }
     if !note.is_empty() {
         s.push_str(&format!("      {}", style(note).dim()));
     }
@@ -284,5 +330,37 @@ mod tests {
         assert!(plain.contains("1 unmerged"));
         assert!(plain.contains("1 dirty"));
         assert!(plain.contains("2 clean"));
+    }
+
+    #[test]
+    fn dirty_counts_every_dirty_tree_and_missing_is_separate() {
+        let mk = |ahead: u32, dirty: u32, missing: bool| Worktree {
+            ahead,
+            dirty,
+            missing,
+            ..Default::default()
+        };
+        let rows = vec![
+            mk(3, 2, false),
+            mk(0, 1, false),
+            mk(0, 0, false),
+            mk(0, 0, true),
+        ];
+        assert_eq!(
+            counts(&rows),
+            Counts {
+                unmerged: 1,
+                dirty: 2,
+                clean: 1,
+                missing: 1
+            }
+        );
+        let plain = console::strip_ansi_codes(&summary_line(&rows, "")).to_string();
+        assert!(plain.contains("2 dirty"), "{plain}");
+        assert!(plain.contains("✕ 1 missing"), "{plain}");
+        let mut locked = mk(0, 0, false);
+        locked.locked = true;
+        locked.name = "x".into();
+        assert!(worktree_table(&[locked]).to_string().contains("x locked"));
     }
 }
