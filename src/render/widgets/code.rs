@@ -7,9 +7,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
 use ratatui::Frame;
 
-use crate::collect::loc::LocRow;
+use crate::collect::loc::{self, LocRow};
 use crate::theme::{Depth, Theme};
-use crate::util::thousands;
+use crate::util::{compact_count, thousands};
 
 /// A Nerd Font glyph for a language name (falls back to a generic file icon).
 /// Requires a Nerd Font in the terminal; unknown languages still render fine.
@@ -92,6 +92,32 @@ fn bar(frac: f64, width: usize) -> String {
     s
 }
 
+/// Headline size of the repo: source lines first, with data languages (JSON,
+/// CSV, SVG…) only as an "incl. data" figure so they can't dwarf the code.
+/// e.g. "574K code · 3.05M incl. data", or "574K lines" when there is no data.
+pub fn headline(rows: &[LocRow]) -> String {
+    let code = loc::code_totals(rows).lines as u64;
+    let all = loc::totals(rows).lines as u64;
+    if code == all {
+        format!("{} lines", compact_count(all))
+    } else {
+        format!(
+            "{} code · {} incl. data",
+            compact_count(code),
+            compact_count(all)
+        )
+    }
+}
+
+/// Language cell: icon + name, with a dim "data" tag for data languages.
+pub fn language_cell(theme: &Theme, lang: &str, style: Style) -> Line<'static> {
+    let mut spans = vec![Span::styled(format!("{} {lang}", lang_icon(lang)), style)];
+    if loc::is_data_language(lang) {
+        spans.push(Span::styled(" data", theme.dim_style()));
+    }
+    Line::from(spans)
+}
+
 /// Render the Code (LOC) table into `area`.
 ///
 /// Stateful like every other table, so the cursor shows and scrolls. The
@@ -105,17 +131,14 @@ pub fn render(
     focused: bool,
     state: &mut TableState,
 ) {
-    let tot = crate::collect::loc::totals(rows);
+    let tot = loc::code_totals(rows);
     let total = Line::from(vec![
         Span::styled(" TOTAL ", theme.title()),
         Span::styled(
             format!("{} files · ", thousands(tot.files as u64)),
             theme.dim_style(),
         ),
-        Span::styled(
-            format!("{} lines ", thousands(tot.lines as u64)),
-            theme.title(),
-        ),
+        Span::styled(format!("{} ", headline(rows)), theme.title()),
     ])
     .right_aligned();
     let block = Block::default()
@@ -139,13 +162,20 @@ pub fn render(
     let body: Vec<Row> = rows
         .iter()
         .map(|r| {
-            let fg = lang_fg(theme, &r.language);
+            let data = loc::is_data_language(&r.language);
+            let fg = if data {
+                theme.dim_style()
+            } else {
+                lang_fg(theme, &r.language)
+            };
+            let name_style = if data {
+                fg
+            } else {
+                fg.add_modifier(Modifier::BOLD)
+            };
             let frac = r.lines as f64 / max_lines;
             Row::new(vec![
-                Cell::from(Span::styled(
-                    format!("{} {}", lang_icon(&r.language), r.language),
-                    fg.add_modifier(Modifier::BOLD),
-                )),
+                Cell::from(language_cell(theme, &r.language, name_style)),
                 Cell::from(Span::styled(thousands(r.files as u64), theme.dim_style())),
                 Cell::from(Span::styled(thousands(r.lines as u64), fg)),
                 Cell::from(Span::styled(bar(frac, 8), fg)),
@@ -181,6 +211,37 @@ mod tests {
         assert_eq!(lang_color("ts"), lang_color("typescript"));
         // Unknown languages fall back to the neutral grey, not a panic.
         assert_eq!(lang_color("brainfuck"), Color::Rgb(0x9E, 0xA3, 0xAE));
+    }
+
+    fn row(language: &str, lines: usize) -> LocRow {
+        LocRow {
+            language: language.into(),
+            files: 1,
+            lines,
+            code: lines,
+        }
+    }
+
+    #[test]
+    fn headline_separates_code_from_data() {
+        let rows = vec![row("Rust", 574_000), row("JSON", 2_476_000)];
+        assert_eq!(headline(&rows), "574K code · 3.05M incl. data");
+        assert_eq!(headline(&[row("Rust", 1_200)]), "1.20K lines");
+        assert_eq!(headline(&[]), "0 lines");
+    }
+
+    #[test]
+    fn data_languages_are_tagged() {
+        let theme = Theme::default();
+        let text = |l: &str| -> String {
+            language_cell(&theme, l, Style::new())
+                .spans
+                .iter()
+                .map(|s| s.content.to_string())
+                .collect()
+        };
+        assert!(text("JSON").ends_with("JSON data"));
+        assert!(text("Rust").ends_with("Rust"));
     }
 
     #[test]

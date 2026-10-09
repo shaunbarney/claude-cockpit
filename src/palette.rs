@@ -30,6 +30,12 @@ pub enum Command {
     Projects,
     /// Switch to the `n`th entry of `App::project_list`.
     SwitchProject(usize),
+    /// Show every project's jobs (`true`) or only this project's.
+    JobsAll(bool),
+    /// Show every container (`true`) or only this project's.
+    DockerAll(bool),
+    /// Open the list of collector failures and config problems.
+    Problems,
     /// Toggle the key help.
     Help,
     Quit,
@@ -86,6 +92,21 @@ pub fn project_entries(list: &[crate::projects::host::ListedProject]) -> Vec<Ent
     out
 }
 
+/// Scope toggles, offering only the change from the current state.
+pub fn scope_entries(jobs_all: bool, docker_all: bool) -> Vec<Entry> {
+    let jobs = if jobs_all {
+        Entry::new("Jobs: show this project only", "a", Command::JobsAll(false))
+    } else {
+        Entry::new("Jobs: show all projects", "a", Command::JobsAll(true))
+    };
+    let docker = if docker_all {
+        Entry::new("Docker: this project only", "a", Command::DockerAll(false))
+    } else {
+        Entry::new("Docker: show all containers", "a", Command::DockerAll(true))
+    };
+    vec![jobs, docker]
+}
+
 pub fn registry(focus: WidgetKind, table_ops: bool) -> Vec<Entry> {
     let mut out: Vec<Entry> = WidgetKind::all()
         .iter()
@@ -108,6 +129,7 @@ pub fn registry(focus: WidgetKind, table_ops: bool) -> Vec<Entry> {
     }
 
     out.push(Entry::new("Refresh now", "r", Command::Refresh));
+    out.push(Entry::new("Show problems", "", Command::Problems));
     out.push(Entry::new("Toggle key help", "?", Command::Help));
     out.push(Entry::new("Quit", "q", Command::Quit));
     out
@@ -163,6 +185,17 @@ mod tests {
             .any(|e| e.cmd == Command::Focus(WidgetKind::Jobs)));
         let jobs = registry(WidgetKind::Jobs, true);
         assert!(jobs.iter().any(|e| e.cmd == Command::Filter));
+    }
+
+    #[test]
+    fn scope_entries_offer_the_other_scope() {
+        let e = scope_entries(false, false);
+        assert_eq!(e[0].cmd, Command::JobsAll(true));
+        assert_eq!(e[1].cmd, Command::DockerAll(true));
+        assert_eq!(e[0].label, "Jobs: show all projects");
+        let e = scope_entries(true, true);
+        assert_eq!(e[0].cmd, Command::JobsAll(false));
+        assert_eq!(e[1].label, "Docker: this project only");
     }
 
     #[test]

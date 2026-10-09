@@ -29,6 +29,8 @@ pub struct Kpis {
     pub rate_pct: Option<u64>,
     pub containers_up: usize,
     pub containers_total: usize,
+    /// Collector failures + config diagnostics (filled in by the caller).
+    pub problems: usize,
 }
 
 /// Reduce a dashboard snapshot to its headline numbers.
@@ -68,6 +70,7 @@ pub fn kpis(d: &DashboardData, today: &str) -> Kpis {
         rate_pct,
         containers_up,
         containers_total: mine.len(),
+        problems: 0,
     }
 }
 
@@ -157,6 +160,20 @@ fn segments(k: &Kpis, theme: &Theme) -> Vec<Seg> {
                 Style::new().fg(theme.level_color(lvl)),
             ),
             Span::styled(" containers", theme.muted_style()),
+        ]));
+    }
+
+    if k.problems > 0 {
+        out.push(seg(vec![
+            Span::styled(format!("⚠ {}", k.problems), Style::new().fg(theme.warn)),
+            Span::styled(
+                if k.problems == 1 {
+                    " problem"
+                } else {
+                    " problems"
+                },
+                theme.muted_style(),
+            ),
         ]));
     }
 
@@ -387,6 +404,23 @@ mod tests {
             .iter()
             .map(|c| c.symbol())
             .collect()
+    }
+
+    #[test]
+    fn problems_segment_only_when_there_are_problems() {
+        let theme = Theme::default();
+        let text = |k: &Kpis| -> String {
+            segments(k, &theme)
+                .iter()
+                .flat_map(|s| s.spans.iter().map(|sp| sp.content.to_string()))
+                .collect()
+        };
+        let mut k = Kpis::default();
+        assert!(!text(&k).contains('⚠'));
+        k.problems = 2;
+        assert!(text(&k).contains("⚠ 2 problems"));
+        k.problems = 1;
+        assert!(text(&k).ends_with("⚠ 1 problem"));
     }
 
     #[test]

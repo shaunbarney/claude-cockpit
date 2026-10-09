@@ -49,16 +49,18 @@ fn health_text(c: &Container) -> &str {
     c.health.as_deref().unwrap_or(&c.state)
 }
 
+/// Empty message before the first docker tick for this project lands.
+pub const LOADING: &str = "loading…";
 /// Shown under the caller's empty message when no filter is active.
 const EMPTY_HINT: &str = "docker not running, not installed, or no containers";
 /// Bottom-border note when the repo has no containers and all are shown.
 const FALLBACK_NOTE: &str = " no containers for this repo — showing all ";
 
 /// Draw the empty state plus a one-line hint beneath the message.
-fn render_empty(f: &mut Frame, area: Rect, ctx: &TableCtx<'_>) {
-    super::empty_state(f, area, " Docker ", ctx.empty, ctx);
+fn render_empty(f: &mut Frame, area: Rect, title: &str, ctx: &TableCtx<'_>) {
+    super::empty_state(f, area, title, ctx.empty, ctx);
     // A filter miss explains itself; only the "nothing at all" case needs help.
-    if ctx.empty.starts_with("nothing matches") || area.height < 5 {
+    if ctx.empty.starts_with("nothing matches") || ctx.empty == LOADING || area.height < 5 {
         return;
     }
     let inner = Block::default().borders(Borders::ALL).inner(area);
@@ -95,9 +97,10 @@ pub fn render(
     containers: &[Container],
     ctx: TableCtx<'_>,
     state: &mut TableState,
+    title: &str,
 ) {
     if containers.is_empty() {
-        return render_empty(f, area, &ctx);
+        return render_empty(f, area, title, &ctx);
     }
     let TableCtx {
         theme,
@@ -114,7 +117,7 @@ pub fn render(
 
     let mut block = Block::default()
         .borders(Borders::ALL)
-        .title(" Docker ")
+        .title(title.to_string())
         .border_style(border_style);
     if containers.iter().all(|c| !c.in_repo) {
         block = block.title_bottom(Line::from(Span::styled(FALLBACK_NOTE, theme.dim_style())));
@@ -258,6 +261,7 @@ mod tests {
                     empty: "nothing here",
                 },
                 &mut st,
+                " Docker ",
             )
         })
         .unwrap();
@@ -292,6 +296,7 @@ mod tests {
                     empty: "no containers — is the docker daemon up?",
                 },
                 &mut st,
+                " Docker ",
             )
         })
         .unwrap();
@@ -322,6 +327,7 @@ mod tests {
                     empty,
                 },
                 &mut st,
+                " Docker ",
             )
         })
         .unwrap();

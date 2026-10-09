@@ -8,7 +8,7 @@ use ratatui::Frame;
 
 use crate::collect::git_detail::{DiffMode, FileChange, MergeStatus, WorktreeDetail};
 use crate::collect::jobs::Job;
-use crate::theme::Theme;
+use crate::theme::{Level, Theme};
 
 /// Build the combined file list in render order: uncommitted (staged then unstaged) then committed.
 fn combined_files(d: &WorktreeDetail) -> Vec<(&FileChange, DiffMode)> {
@@ -64,6 +64,64 @@ fn owning_job<'a>(jobs: &'a [Job], path: &str) -> Option<&'a Job> {
         .or(first)
 }
 
+/// The ref merges are judged against, falling back to "main" when unknown.
+fn base_label(detail: &WorktreeDetail) -> &str {
+    if detail.base.is_empty() {
+        "main"
+    } else {
+        &detail.base
+    }
+}
+
+/// Human verdict and severity for a merge status against `base`.
+pub fn merge_text(m: &MergeStatus, base: &str) -> (Level, String) {
+    match m {
+        MergeStatus::Clean => (Level::Ok, format!("merges cleanly into {base}")),
+        MergeStatus::UpToDate => (Level::Idle, format!("identical to {base}")),
+        MergeStatus::NothingToMerge(n) => (
+            Level::Idle,
+            format!("no commits of its own; {n} behind {base}"),
+        ),
+        MergeStatus::Behind(n) => (
+            Level::Info,
+            format!("merges cleanly; {base} moved {n} commits — consider rebasing"),
+        ),
+        MergeStatus::Dirty(n) => (
+            Level::Warn,
+            format!("{n} uncommitted changes — commit first"),
+        ),
+        MergeStatus::Conflicts(files) => {
+            let shown: Vec<&str> = files.iter().take(3).map(String::as_str).collect();
+            let more = files.len().saturating_sub(shown.len());
+            let tail = if more > 0 {
+                format!(" +{more}")
+            } else {
+                String::new()
+            };
+            (
+                Level::Err,
+                format!(
+                    "conflicts with {base} in {} files: {}{tail}",
+                    files.len(),
+                    shown.join(", ")
+                ),
+            )
+        }
+        MergeStatus::Unknown => (
+            Level::Idle,
+            "couldn't check (git ≥ 2.38 needed for merge-tree)".to_string(),
+        ),
+    }
+}
+
+/// Display label for a changed file: `old → new` for renames.
+fn file_label(fc: &FileChange) -> String {
+    match &fc.old_path {
+        Some(old) => format!("{old} → {}", fc.path),
+        None => fc.path.clone(),
+    }
+}
+
 fn render_activity(
     f: &mut Frame,
     area: ratatui::layout::Rect,
@@ -96,28 +154,12 @@ fn render_activity(
         None => Line::styled("no active job", theme.dim_style()),
     };
 
-    // Merge verdict line.
-    let merge_line = match &detail.merge {
-        MergeStatus::UpToDate => Line::styled("up to date with main", theme.dim_style()),
-        MergeStatus::Clean => Line::styled("clean — safe to merge", Style::new().fg(theme.ok)),
-        MergeStatus::Behind(n) => Line::styled(
-            format!("behind main by {} — rebase before merge", n),
-            Style::new().fg(theme.warn),
-        ),
-        MergeStatus::Conflicts(c) => Line::styled(
-            format!("conflicts with main ({} files)", c.len()),
-            Style::new().fg(theme.err),
-        ),
-        MergeStatus::NothingToMerge(n) => Line::styled(
-            format!("nothing to merge — base is {} commits ahead", n),
-            theme.dim_style(),
-        ),
-        MergeStatus::Dirty(n) => Line::styled(
-            format!("{} uncommitted changes — commit before merging", n),
-            Style::new().fg(theme.warn),
-        ),
-        MergeStatus::Unknown => Line::styled("merge status unknown", theme.dim_style()),
-    };
+    let (level, msg) = merge_text(&detail.merge, base_label(detail));
+    let merge_line = Line::from(vec![
+        theme.level_span(level),
+        Span::raw(" "),
+        Span::styled(msg, Style::new().fg(theme.level_color(level))),
+    ]);
 
     let text = ratatui::text::Text::from(vec![activity_line, merge_line]);
     f.render_widget(Paragraph::new(text), inner);
@@ -140,13 +182,18 @@ fn render_files(
         .iter()
         .map(|(fc, mode)| {
             let (marker, marker_style) = match mode {
+                _ if fc.untracked => ("?", Style::new().fg(theme.info)),
                 DiffMode::Staged => ("S", Style::new().fg(theme.ok)),
                 DiffMode::Unstaged => ("M", Style::new().fg(theme.warn)),
                 DiffMode::Committed => ("C", theme.dim_style()),
             };
+            let mut name = vec![Span::raw(file_label(fc))];
+            if fc.untracked {
+                name.push(Span::styled(" untracked", theme.dim_style()));
+            }
             Row::new(vec![
                 Cell::from(marker).style(marker_style),
-                Cell::from(fc.path.clone()),
+                Cell::from(Line::from(name)),
                 Cell::from(format!("+{}", fc.added)).style(Style::new().fg(theme.ok)),
                 Cell::from(format!("-{}", fc.deleted)).style(Style::new().fg(theme.err)),
             ])
@@ -197,7 +244,10 @@ fn render_commits(
         .collect();
 
     let text = if lines.is_empty() {
-        ratatui::text::Text::styled("no commits ahead of main", theme.dim_style())
+        ratatui::text::Text::styled(
+            format!("no commits ahead of {}", base_label(detail)),
+            theme.dim_style(),
+        )
     } else {
         ratatui::text::Text::from(lines)
     };
@@ -275,6 +325,63 @@ mod tests {
             owning_job(&done_only, "/w/a").map(|j| j.name.as_str()),
             Some("old")
         );
+    }
+
+    #[test]
+    fn merge_text_names_the_base_and_severity() {
+        let base = "origin/main";
+        let (l, t) = merge_text(&MergeStatus::Behind(4), base);
+        assert_eq!(l, Level::Info);
+        assert_eq!(
+            t,
+            "merges cleanly; origin/main moved 4 commits — consider rebasing"
+        );
+        let (_, t) = merge_text(&MergeStatus::NothingToMerge(2), base);
+        assert_eq!(t, "no commits of its own; 2 behind origin/main");
+        let (l, t) = merge_text(&MergeStatus::Dirty(3), base);
+        assert_eq!(
+            (l, t.as_str()),
+            (Level::Warn, "3 uncommitted changes — commit first")
+        );
+        let (l, t) = merge_text(&MergeStatus::Unknown, base);
+        assert_eq!(l, Level::Idle);
+        assert!(t.contains("2.38"));
+        let files: Vec<String> = ["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect();
+        let (l, t) = merge_text(&MergeStatus::Conflicts(files), base);
+        assert_eq!(l, Level::Err);
+        assert_eq!(t, "conflicts with origin/main in 4 files: a, b, c +1");
+        assert_eq!(merge_text(&MergeStatus::Clean, base).0, Level::Ok);
+        assert_eq!(merge_text(&MergeStatus::UpToDate, base).0, Level::Idle);
+    }
+
+    #[test]
+    fn renames_and_untracked_files_are_labelled() {
+        let mut d = mk_detail();
+        d.base = "origin/dev".into();
+        d.merge = MergeStatus::Behind(2);
+        d.uncommitted_files = vec![
+            FileChange {
+                path: "new.rs".into(),
+                old_path: Some("old.rs".into()),
+                staged: true,
+                ..Default::default()
+            },
+            FileChange {
+                path: "scratch.txt".into(),
+                untracked: true,
+                ..Default::default()
+            },
+        ];
+        let mut st = TableState::default();
+        let mut term = Terminal::new(TestBackend::new(140, 30)).unwrap();
+        term.draw(|f| {
+            render(f, f.area(), &d, &[], &Theme::default(), &mut st, 0);
+        })
+        .unwrap();
+        let s = buffer_text(term.backend().buffer());
+        assert!(s.contains("old.rs → new.rs"));
+        assert!(s.contains("scratch.txt untracked"));
+        assert!(s.contains("origin/dev moved 2 commits"));
     }
 
     #[test]

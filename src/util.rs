@@ -65,6 +65,27 @@ pub fn thousands(n: u64) -> String {
     out
 }
 
+/// Compact count to three significant figures: 950 -> "950",
+/// 5_740 -> "5.74K", 574_000 -> "574K", 3_050_000 -> "3.05M".
+pub fn compact_count(n: u64) -> String {
+    const UNITS: [(u64, &str); 3] = [(1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")];
+    for (div, unit) in UNITS {
+        if n >= div {
+            let v = n as f64 / div as f64;
+            // Pick decimals so the rounded value keeps three significant figures.
+            let s = if v >= 99.95 {
+                format!("{v:.0}")
+            } else if v >= 9.995 {
+                format!("{v:.1}")
+            } else {
+                format!("{v:.2}")
+            };
+            return format!("{s}{unit}");
+        }
+    }
+    n.to_string()
+}
+
 /// Strip a leading "claude-" prefix so model names fit narrow columns.
 pub fn short_model(name: &str) -> String {
     name.strip_prefix("claude-").unwrap_or(name).to_string()
@@ -100,6 +121,16 @@ mod tests {
         assert_eq!(human_bytes(1536), "1.5 KB");
         assert_eq!(human_bytes(5 * 1024 * 1024), "5.0 MB");
     }
+    #[test]
+    fn compact_count_keeps_three_figures() {
+        assert_eq!(compact_count(950), "950");
+        assert_eq!(compact_count(5_740), "5.74K");
+        assert_eq!(compact_count(57_400), "57.4K");
+        assert_eq!(compact_count(574_321), "574K");
+        assert_eq!(compact_count(3_050_000), "3.05M");
+        assert_eq!(compact_count(1_000_000), "1.00M");
+    }
+
     #[test]
     fn duration_human() {
         assert_eq!(human_duration(45), "45s");

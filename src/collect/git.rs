@@ -95,13 +95,6 @@ pub fn repo_root() -> String {
     git(&["rev-parse", "--show-toplevel"]).trim().to_string()
 }
 
-/// `git fetch origin --quiet` (best-effort; ignores failure, same as Python).
-pub fn fetch_origin(root: &str) {
-    let _ = crate::util::git_cmd()
-        .args(["-C", root, "fetch", "origin", "--quiet"])
-        .output();
-}
-
 fn ref_exists(root: &str, refname: &str) -> bool {
     git_ok(&["-C", root, "rev-parse", "--verify", "--quiet", refname]).is_some()
 }

@@ -185,7 +185,9 @@ fn draw_job(f: &mut Frame, app: &mut App, body: Rect, id: &str, now: i64) {
         return gone(f, app, body, "that job");
     };
     let events = timeline(app, id);
-    let viewport = body.height.saturating_sub(super::job::HEADER_H + 2);
+    let viewport = body
+        .height
+        .saturating_sub(super::job::header_height(&job) + 2);
     let scroll = bound(app, events.len(), viewport);
     let theme = app.theme.clone();
     super::job::render(f, body, &job, &events, &theme, now, scroll);

@@ -68,6 +68,7 @@ pub fn render(
     ctx: TableCtx<'_>,
     state: &mut TableState,
     now: i64,
+    title: &str,
 ) {
     let TableCtx {
         theme,
@@ -84,11 +85,11 @@ pub fn render(
             flash,
             empty,
         };
-        return super::empty_state(f, area, " Jobs ", empty, &ctx);
+        return super::empty_state(f, area, title, empty, &ctx);
     }
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Jobs ")
+        .title(title.to_string())
         .border_style(theme.border_style(focused));
 
     // The name is what identifies a job, so it gets every spare column; the
@@ -253,6 +254,7 @@ mod tests {
                 },
                 &mut st,
                 200,
+                " Jobs ",
             )
         })
         .unwrap();

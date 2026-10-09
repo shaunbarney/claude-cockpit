@@ -1,34 +1,56 @@
 //! Full-screen detail view for a single Claude Code background job.
 
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 use ratatui::Frame;
 
-use crate::collect::jobs::{Job, JobEvent};
+use crate::collect::jobs::{is_error_state, Job, JobEvent};
 use crate::theme::Theme;
 use crate::util::{human_duration, worktree_label};
 
-/// Header height: four content lines plus the border.
-pub const HEADER_H: u16 = 6;
+/// States after which a job does no more work.
+fn is_terminal(state: &str) -> bool {
+    matches!(
+        state.to_ascii_lowercase().as_str(),
+        "done" | "completed" | "cancelled" | "canceled" | "stopped"
+    ) || is_error_state(state)
+}
 
 /// Colour a state string using theme semantics.
 fn state_style(state: &str, theme: &Theme) -> Style {
     match state {
         "working" => Style::new().fg(theme.ok),
         "blocked" => Style::new().fg(theme.warn),
+        s if is_error_state(s) => Style::new().fg(theme.err),
         _ => theme.dim_style(),
     }
+}
+
+/// How long the job has run: up to now while live, and frozen at the moment
+/// it finished (`last_terminal_at`, else its last update) once terminal.
+pub fn job_duration(job: &Job, now: i64) -> Option<u64> {
+    let start = job.created_at?;
+    let end = if is_terminal(&job.state) {
+        job.last_terminal_at.or(job.updated_at).unwrap_or(now)
+    } else {
+        now
+    };
+    Some((end - start).max(0) as u64)
+}
+
+/// Height of the header block for `job`: its content lines plus the border.
+pub fn header_height(job: &Job) -> u16 {
+    header_lines(job, &Theme::default(), 0).len() as u16 + 2
 }
 
 /// Render the full-screen job detail view.
 ///
 /// Layout: a header block sized to its own content + the timeline taking the
-/// rest. The header used to be pinned at 7 lines for 3 lines of text, which
-/// wasted two rows of a view whose whole job is showing a long timeline.
+/// rest.
 pub fn render(
     f: &mut Frame,
     area: ratatui::layout::Rect,
@@ -38,10 +60,80 @@ pub fn render(
     now: i64,
     scroll: u16,
 ) {
-    let chunks = Layout::vertical([Constraint::Length(HEADER_H), Constraint::Min(0)]).split(area);
+    let chunks =
+        Layout::vertical([Constraint::Length(header_height(job)), Constraint::Min(0)]).split(area);
 
     render_header(f, chunks[0], job, theme, now);
     render_timeline(f, chunks[1], events, theme, scroll);
+}
+
+/// A `Label: value` line, omitted (None) when the value is empty.
+fn field(label: &str, value: &str, style: Style, theme: &Theme) -> Option<Line<'static>> {
+    if value.trim().is_empty() {
+        return None;
+    }
+    Some(Line::from(vec![
+        Span::styled(format!("{label}: "), theme.dim_style()),
+        Span::styled(value.trim().to_string(), style),
+    ]))
+}
+
+/// Header content. A blocked job leads with what it needs and the reply it
+/// suggests, since answering it is the reason to open this view.
+fn header_lines(job: &Job, theme: &Theme, now: i64) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if job.state == "blocked" {
+        let warn = Style::new().fg(theme.warn).add_modifier(Modifier::BOLD);
+        lines.extend(field("Needs", &job.needs, warn, theme));
+        let reply = Style::new().fg(theme.accent);
+        lines.extend(field("Suggested reply", &job.suggested_reply, reply, theme));
+    }
+    lines.push(Line::from(vec![
+        Span::styled("State: ", theme.dim_style()),
+        Span::styled(job.state.clone(), state_style(&job.state, theme)),
+        Span::styled("  Tempo: ", theme.dim_style()),
+        Span::styled(job.tempo.clone(), theme.dim_style()),
+    ]));
+    lines.extend(field("Doing", &job.detail, Style::new(), theme));
+    let goal = if job.intent.trim().is_empty() {
+        "—"
+    } else {
+        &job.intent
+    };
+    lines.extend(field("Goal", goal, Style::new(), theme));
+    lines.push(Line::from(vec![
+        Span::styled("Worktree: ", theme.dim_style()),
+        Span::raw(worktree_label(
+            job.worktree_branch.as_deref(),
+            job.worktree_path.as_deref(),
+        )),
+    ]));
+    if is_terminal(&job.state) {
+        let style = if is_error_state(&job.state) {
+            Style::new().fg(theme.err)
+        } else {
+            Style::new()
+        };
+        lines.extend(field("Result", &job.output_result, style, theme));
+    }
+    lines.push(timing_line(job, theme, now));
+    lines
+}
+
+fn timing_line(job: &Job, theme: &Theme, now: i64) -> Line<'static> {
+    let duration_val = job_duration(job, now)
+        .map(human_duration)
+        .unwrap_or_else(|| "—".to_string());
+    let updated_val = job
+        .updated_at
+        .map(|u| format!("{} ago", human_duration((now - u).max(0) as u64)))
+        .unwrap_or_else(|| "—".to_string());
+    Line::from(vec![
+        Span::styled("Duration: ", theme.dim_style()),
+        Span::raw(duration_val),
+        Span::styled("   Updated: ", theme.dim_style()),
+        Span::styled(updated_val, theme.dim_style()),
+    ])
 }
 
 fn render_header(f: &mut Frame, area: ratatui::layout::Rect, job: &Job, theme: &Theme, now: i64) {
@@ -50,50 +142,7 @@ fn render_header(f: &mut Frame, area: ratatui::layout::Rect, job: &Job, theme: &
         .borders(Borders::ALL)
         .title(title)
         .title_style(theme.title());
-
-    let state_sp = Span::styled(job.state.clone(), state_style(&job.state, theme));
-    let tempo_sp = Span::styled(job.tempo.clone(), theme.dim_style());
-
-    let duration_val = job
-        .created_at
-        .map(|c| human_duration((now - c).max(0) as u64))
-        .unwrap_or_else(|| "—".to_string());
-    let updated_val = job
-        .updated_at
-        .map(|u| format!("{} ago", human_duration((now - u).max(0) as u64)))
-        .unwrap_or_else(|| "—".to_string());
-
-    let lines: Vec<Line> = vec![
-        Line::from(vec![
-            Span::raw("State: "),
-            state_sp,
-            Span::raw("  Tempo: "),
-            tempo_sp,
-        ]),
-        Line::from(vec![
-            Span::styled("Doing: ", theme.dim_style()),
-            Span::raw(if job.intent.is_empty() {
-                "—".to_string()
-            } else {
-                job.intent.clone()
-            }),
-        ]),
-        Line::from(vec![
-            Span::raw("Worktree: "),
-            Span::raw(worktree_label(
-                job.worktree_branch.as_deref(),
-                job.worktree_path.as_deref(),
-            )),
-        ]),
-        Line::from(vec![
-            Span::raw("Duration: "),
-            Span::raw(duration_val),
-            Span::raw("   Updated: "),
-            Span::styled(updated_val, theme.dim_style()),
-        ]),
-    ];
-
-    let p = Paragraph::new(Text::from(lines)).block(block);
+    let p = Paragraph::new(Text::from(header_lines(job, theme, now))).block(block);
     f.render_widget(p, area);
 }
 
@@ -293,6 +342,60 @@ mod tests {
         };
         // Way past the end must land on the same frame as the true end, not
         // on an empty pane.
-        assert_eq!(draw(9_000), draw(40 - (24 - HEADER_H - 2)));
+        assert_eq!(draw(9_000), draw(40 - (24 - header_height(&job) - 2)));
+    }
+
+    #[test]
+    fn duration_freezes_when_the_job_ends() {
+        let mut j = mk_job("J");
+        j.created_at = Some(1_000);
+        j.updated_at = Some(1_300);
+        assert_eq!(job_duration(&j, 5_000), Some(4_000), "live jobs run to now");
+        j.state = "done".into();
+        assert_eq!(
+            job_duration(&j, 5_000),
+            Some(300),
+            "falls back to updated_at"
+        );
+        j.last_terminal_at = Some(1_200);
+        assert_eq!(job_duration(&j, 5_000), Some(200));
+        j.state = "failed".into();
+        assert_eq!(job_duration(&j, 5_000), Some(200));
+        j.created_at = None;
+        assert_eq!(job_duration(&j, 5_000), None);
+    }
+
+    fn header_text(job: &Job) -> Vec<String> {
+        header_lines(job, &Theme::default(), 1_001_000)
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.to_string()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn blocked_job_leads_with_needs_and_reply() {
+        let mut j = mk_job("J");
+        j.state = "blocked".into();
+        j.needs = "which DB to use".into();
+        j.suggested_reply = "use postgres".into();
+        j.detail = "waiting on input".into();
+        let lines = header_text(&j);
+        assert_eq!(lines[0], "Needs: which DB to use");
+        assert_eq!(lines[1], "Suggested reply: use postgres");
+        assert!(lines.iter().any(|l| l == "Doing: waiting on input"));
+        assert!(lines.iter().any(|l| l.starts_with("Goal: Implement")));
+        assert_eq!(header_height(&j), lines.len() as u16 + 2);
+    }
+
+    #[test]
+    fn done_job_shows_result_and_live_job_does_not() {
+        let mut j = mk_job("J");
+        j.output_result = "shipped PR #12".into();
+        assert!(!header_text(&j).iter().any(|l| l.starts_with("Result")));
+        j.state = "done".into();
+        assert!(header_text(&j)
+            .iter()
+            .any(|l| l == "Result: shipped PR #12"));
+        assert!(!header_text(&j).iter().any(|l| l.starts_with("Doing")));
     }
 }

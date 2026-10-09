@@ -38,11 +38,12 @@ pub fn render(f: &mut Frame, app: &mut App) {
 }
 
 /// What a widget says when it has nothing to show.
-fn empty_msg(kind: WidgetKind, filter: &str) -> String {
+fn empty_msg(kind: WidgetKind, filter: &str, containers_loaded: bool) -> String {
     if !filter.is_empty() {
         return format!("nothing matches “{filter}”");
     }
     match kind {
+        WidgetKind::Docker if !containers_loaded => widgets::docker::LOADING.into(),
         WidgetKind::Worktrees => "no linked worktrees — git worktree add …".into(),
         WidgetKind::Jobs => "no background agents".into(),
         WidgetKind::Docker => "no containers — is the docker daemon up?".into(),
@@ -153,12 +154,14 @@ fn draw_content(f: &mut Frame, app: &mut App) {
     // Snapshot the datasets, then drop the lock before rendering.
     let data = app.data.lock().unwrap();
     let repo = data.repo.clone();
-    let kpis = header::kpis(&data, &today);
+    let mut kpis = header::kpis(&data, &today);
+    kpis.problems = app.problems.len();
     let wts = data.worktrees.clone();
     let loc = data.loc.clone();
     let jobs = data.jobs.clone();
     let usage = data.usage.clone();
     let containers = data.containers.clone();
+    let containers_loaded = data.containers_loaded;
     let endpoints = data.endpoints.clone();
     let tools = data.tools.clone();
     let skills = data.skills.clone();
@@ -178,6 +181,7 @@ fn draw_content(f: &mut Frame, app: &mut App) {
         jobs: &jobs,
         usage: usage.as_ref(),
         containers: &containers,
+        containers_loaded,
         endpoints: &endpoints,
         tools: &tools,
         skills: &skills,
@@ -204,6 +208,7 @@ struct WidgetData<'a> {
     jobs: &'a [crate::collect::jobs::Job],
     usage: Option<&'a crate::collect::usage::UsageTotals>,
     containers: &'a [crate::collect::docker::Container],
+    containers_loaded: bool,
     endpoints: &'a [crate::collect::ports::Endpoint],
     tools: &'a [crate::collect::tools::ToolStat],
     skills: &'a [crate::collect::skills::Skill],
@@ -244,7 +249,7 @@ fn draw_widget(
     let (theme, focused, b) = (cx.theme, cx.focused, cx.band);
     let vis = app.visible.get(&kind).cloned().unwrap_or_default();
     let filter = app.filter_of(kind).to_string();
-    let empty = empty_msg(kind, &filter);
+    let empty = empty_msg(kind, &filter, d.containers_loaded);
 
     macro_rules! ctx {
         ($flash:expr) => {
@@ -270,14 +275,16 @@ fn draw_widget(
             let rows = pick(d.jobs, &vis);
             let flash = flash_for(d.jobs, &vis, kind, app, theme);
             with_state(app, kind, focused, |st| {
-                widgets::jobs::render(f, rect, &rows, ctx!(&flash), st, cx.now)
+                let title = crate::scope::jobs_title(crate::refresh::jobs_all());
+                widgets::jobs::render(f, rect, &rows, ctx!(&flash), st, cx.now, title)
             });
         }
         WidgetKind::Docker => {
             let rows = pick(d.containers, &vis);
             let flash = flash_for(d.containers, &vis, kind, app, theme);
             with_state(app, kind, focused, |st| {
-                widgets::docker::render(f, rect, &rows, ctx!(&flash), st)
+                let title = crate::scope::docker_title(crate::scope::docker_all());
+                widgets::docker::render(f, rect, &rows, ctx!(&flash), st, title)
             });
         }
         WidgetKind::Ports => {
@@ -363,6 +370,15 @@ mod tests {
 
     fn buffer_text(buf: &ratatui::buffer::Buffer) -> String {
         buf.content.iter().map(|c| c.symbol()).collect()
+    }
+
+    #[test]
+    fn docker_says_loading_until_the_first_tick() {
+        assert_eq!(empty_msg(WidgetKind::Docker, "", false), "loading…");
+        assert!(empty_msg(WidgetKind::Docker, "", true).starts_with("no containers"));
+        // A filter miss is a filter miss either way.
+        assert!(empty_msg(WidgetKind::Docker, "x", false).starts_with("nothing matches"));
+        assert!(empty_msg(WidgetKind::Jobs, "", false).starts_with("no background"));
     }
 
     fn draw(app: &mut App, w: u16, h: u16) -> String {
@@ -694,6 +710,27 @@ mod tests {
         let _ = draw(&mut app, 100, 30);
         apply(&mut app, Action::PageDown, ".");
         assert_eq!(app.detail_scroll, 0);
+    }
+
+    #[test]
+    fn container_logs_open_at_the_newest_line_when_they_land() {
+        let mut app = App::new(Theme::default());
+        app.data.lock().unwrap().containers = vec![crate::collect::docker::Container {
+            id: "c1".into(),
+            name: "svc".into(),
+            ..Default::default()
+        }];
+        app.open_detail(Detail::Container("c1".into()));
+        let lines: Vec<String> = (0..100).map(|i| format!("log line {i}")).collect();
+        app.spawn_load(move |token| crate::app::Loaded::Logs { token, lines });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !app.drain_loads() {
+            assert!(std::time::Instant::now() < deadline, "logs never landed");
+            std::thread::yield_now();
+        }
+        let s = draw(&mut app, 100, 30);
+        assert!(s.contains("log line 99"), "newest line must be on screen");
+        assert_eq!(app.detail_scroll, app.detail_max);
     }
 
     #[test]

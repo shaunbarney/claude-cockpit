@@ -54,6 +54,8 @@ pub enum Action {
     Projects,
     /// Switch to the `n`th pinned project (`0` is the `1` key).
     PinnedProject(usize),
+    /// Flip the focused Jobs/Docker widget between this project and all.
+    ToggleScope,
     /// A character typed into the filter or palette.
     Input(char),
     Backspace,
@@ -111,6 +113,7 @@ pub fn map_key(code: KeyCode, mods: KeyModifiers, mode: Mode) -> Action {
         KeyCode::Char('S') => Action::SortReverse,
         KeyCode::Char('?') => Action::Help,
         KeyCode::Char('P') => Action::Projects,
+        KeyCode::Char('a') => Action::ToggleScope,
         KeyCode::Char(c @ '1'..='9') => Action::PinnedProject(c as usize - '1' as usize),
         _ => Action::None,
     }
@@ -151,20 +154,18 @@ fn jump_selection(app: &mut App, to_end: bool) {
 }
 
 /// Combined file list in render order: uncommitted (staged then unstaged) THEN committed.
-fn combined_files(d: &git_detail::WorktreeDetail) -> Vec<(String, DiffMode)> {
-    let mut v: Vec<(String, DiffMode)> = Vec::new();
+fn combined_files(d: &git_detail::WorktreeDetail) -> Vec<(String, Option<String>, DiffMode)> {
+    let mut v = Vec::new();
     for f in &d.uncommitted_files {
-        v.push((
-            f.path.clone(),
-            if f.staged {
-                DiffMode::Staged
-            } else {
-                DiffMode::Unstaged
-            },
-        ));
+        let mode = if f.staged {
+            DiffMode::Staged
+        } else {
+            DiffMode::Unstaged
+        };
+        v.push((f.path.clone(), f.old_path.clone(), mode));
     }
     for f in &d.committed_files {
-        v.push((f.path.clone(), DiffMode::Committed));
+        v.push((f.path.clone(), f.old_path.clone(), DiffMode::Committed));
     }
     v
 }
@@ -290,7 +291,7 @@ fn open_file_diff(app: &mut App) {
         return;
     };
     let files = combined_files(&detail);
-    let Some((path, mode)) = files.get(sel).cloned() else {
+    let Some((path, old_path, mode)) = files.get(sel).cloned() else {
         return;
     };
     let label = match mode {
@@ -298,7 +299,10 @@ fn open_file_diff(app: &mut App) {
         DiffMode::Unstaged => "unstaged",
         DiffMode::Committed => "committed",
     };
-    let title = format!("{path} · {label}");
+    let title = match &old_path {
+        Some(old) => format!("{old} → {path} · {label}"),
+        None => format!("{path} · {label}"),
+    };
     app.open_detail(Detail::Diff(DiffView {
         title: title.clone(),
         lines: Vec::new(),
@@ -309,7 +313,7 @@ fn open_file_diff(app: &mut App) {
         token,
         view: DiffView {
             title,
-            lines: git_detail::file_diff(&root, &path, mode),
+            lines: git_detail::file_diff_paths(&root, &path, old_path.as_deref(), mode),
             loading: false,
         },
     });
@@ -467,6 +471,10 @@ fn clear_filter(app: &mut App) {
 /// The palette entries plus the indices matching the current input.
 pub fn palette_state(app: &mut App) -> (Vec<palette::Entry>, Vec<usize>) {
     let mut entries = palette::registry(app.focus, table_ops(app));
+    entries.extend(palette::scope_entries(
+        refresh::jobs_all(),
+        crate::scope::docker_all(),
+    ));
     entries.extend(palette::project_entries(&app.project_list));
     let input = app.input.clone();
     let hits = palette::search(&entries, &input, &mut app.fuzzy);
@@ -495,6 +503,13 @@ fn run_command(app: &mut App, cmd: Command, root: &str) {
         Command::SwitchProject(i) => {
             app.pending_switch = app.project_list.get(i).map(|p| p.root.clone());
         }
+        Command::JobsAll(all) => crate::scope::set_jobs(all),
+        Command::DockerAll(all) => crate::scope::set_docker(&app.data, all),
+        Command::Problems => app.open_detail(Detail::Diff(DiffView {
+            title: "Problems".into(),
+            lines: crate::problems::report(&app.problems),
+            loading: false,
+        })),
         Command::Help => app.show_help = !app.show_help,
         Command::Quit => app.should_quit = true,
     }
@@ -563,6 +578,7 @@ pub fn apply(app: &mut App, action: Action, root: &str) {
         Action::PinnedProject(n) => {
             app.pending_switch = crate::projects::host::pinned_root(&app.project_list, n);
         }
+        Action::ToggleScope => toggle_scope(app),
         Action::FocusNext => app.focus_next(),
         Action::FocusPrev => app.focus_prev(),
         Action::FocusUp | Action::FocusDown => {
@@ -641,6 +657,22 @@ pub fn apply(app: &mut App, action: Action, root: &str) {
             _ => {}
         },
         Action::None => {}
+    }
+}
+
+/// `a`: flip the focused Jobs or Docker widget's scope; elsewhere a no-op.
+fn toggle_scope(app: &mut App) {
+    if !matches!(app.view, View::Dashboard | View::Expanded(_)) {
+        return;
+    }
+    match app.focus {
+        WidgetKind::Jobs => {
+            crate::scope::toggle_jobs();
+        }
+        WidgetKind::Docker => {
+            crate::scope::toggle_docker(&app.data);
+        }
+        _ => {}
     }
 }
 
@@ -865,6 +897,14 @@ mod tests {
         assert_eq!(
             map_key(KeyCode::Char('s'), KeyModifiers::NONE, n),
             Action::SortCycle
+        );
+        assert_eq!(
+            map_key(KeyCode::Char('a'), KeyModifiers::NONE, n),
+            Action::ToggleScope
+        );
+        assert_eq!(
+            map_key(KeyCode::Char('a'), KeyModifiers::NONE, Mode::Filter),
+            Action::Input('a')
         );
     }
 

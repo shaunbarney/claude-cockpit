@@ -29,6 +29,9 @@ pub struct DashboardData {
     pub usage: Option<crate::collect::usage::UsageTotals>,
     pub activity: Vec<(String, u32)>,
     pub containers: Vec<crate::collect::docker::Container>,
+    /// False until the first docker tick for the current project has landed,
+    /// so an empty list can say "loading" rather than "no containers".
+    pub containers_loaded: bool,
     pub endpoints: Vec<crate::collect::ports::Endpoint>,
     pub tools: Vec<crate::collect::tools::ToolStat>,
     pub skills: Vec<crate::collect::skills::Skill>,
@@ -194,6 +197,8 @@ pub struct App {
     /// A project switch requested by a key or command, applied by the run loop
     /// (which owns the refresh threads).
     pub pending_switch: Option<std::path::PathBuf>,
+    /// Collector failures and config diagnostics, refreshed by the run loop.
+    pub problems: Vec<String>,
 }
 
 impl App {
@@ -235,6 +240,7 @@ impl App {
             picker: None,
             project_list: Vec::new(),
             pending_switch: None,
+            problems: Vec::new(),
         }
     }
 
