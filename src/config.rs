@@ -1,4 +1,14 @@
-//! User configuration: `claude-cockpit.toml` (CWD) or `~/.config/claude-cockpit/config.toml`.
+//! User configuration.
+//!
+//! Looked up in order — `<repo_root>/claude-cockpit.toml`, then
+//! `$XDG_CONFIG_HOME/claude-cockpit/config.toml` (default
+//! `~/.config/claude-cockpit/config.toml`) — and the first file found is used
+//! as-is (no merging). Problems are reported, not swallowed: see
+//! [`load_with_diagnostics`].
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
+
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -85,27 +95,122 @@ impl Default for Config {
 }
 
 /// Parse a TOML config body; returns default on any parse error.
+///
+/// Prefer [`parse_with_diagnostics`], which says *why* a file was ignored.
 pub fn parse(toml_str: &str) -> Config {
-    toml::from_str(toml_str).unwrap_or_default()
+    parse_with_diagnostics(toml_str).0
 }
 
-/// Candidate config paths, in priority order.
-fn candidate_paths() -> Vec<std::path::PathBuf> {
-    let mut v = vec![std::path::PathBuf::from("claude-cockpit.toml")];
-    if let Some(home) = dirs::home_dir() {
-        v.push(home.join(".config/claude-cockpit/config.toml"));
+/// Parse a TOML config body, collecting human-readable diagnostics.
+///
+/// A syntax or type error yields the default config plus the error; unknown
+/// keys (typos, or a key placed under the wrong `[table]`) are ignored with a
+/// warning each, never fatal.
+pub fn parse_with_diagnostics(toml_str: &str) -> (Config, Vec<String>) {
+    let mut unknown = Vec::new();
+    let de = toml::Deserializer::new(toml_str);
+    match serde_ignored::deserialize(de, |path| unknown.push(path.to_string())) {
+        Ok(cfg) => {
+            let diags = unknown
+                .into_iter()
+                .map(|k| format!("unknown key `{k}` (ignored)"))
+                .collect();
+            (cfg, diags)
+        }
+        Err(e) => (
+            Config::default(),
+            vec![format!(
+                "invalid config, using defaults: {}",
+                e.to_string().trim()
+            )],
+        ),
+    }
+}
+
+/// Candidate config paths, in priority order: `<repo_root>/claude-cockpit.toml`,
+/// then `$XDG_CONFIG_HOME/claude-cockpit/config.toml` (default
+/// `~/.config/claude-cockpit/config.toml`). The **first file that exists wins**
+/// outright — files are not merged.
+pub fn candidate_paths(root: &str) -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if !root.is_empty() {
+        v.push(Path::new(root).join("claude-cockpit.toml"));
+    }
+    let xdg = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| dirs::home_dir().map(|h| h.join(".config")));
+    if let Some(base) = xdg {
+        v.push(base.join("claude-cockpit").join("config.toml"));
     }
     v
 }
 
-/// Load config from the first existing candidate path; default if none.
-pub fn load() -> Config {
-    for p in candidate_paths() {
-        if let Ok(s) = std::fs::read_to_string(&p) {
-            return parse(&s);
+/// Load the config for the repo at `root`, with diagnostics (each prefixed by
+/// the file it concerns). Missing files are not an error.
+pub fn load_with_diagnostics(root: &str) -> (Config, Vec<String>) {
+    for p in candidate_paths(root) {
+        match std::fs::read_to_string(&p) {
+            Ok(s) => {
+                let (cfg, diags) = parse_with_diagnostics(&s);
+                let diags = diags
+                    .into_iter()
+                    .map(|d| format!("{}: {d}", p.display()))
+                    .collect();
+                return (cfg, diags);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                return (
+                    Config::default(),
+                    vec![format!("{}: unreadable, using defaults: {e}", p.display())],
+                )
+            }
         }
     }
-    Config::default()
+    (Config::default(), Vec::new())
+}
+
+/// Load the config for the repo at `root`, re-reading from disk only when the
+/// chosen file (or which file exists) changed since the last call.
+pub fn load_for(root: &str) -> Config {
+    load_cached(root).0
+}
+
+/// Which candidate files exist, and their (mtime, len): the cache key.
+type CacheKey = Vec<(PathBuf, Option<(SystemTime, u64)>)>;
+/// (root, key, config, diagnostics) of the last load.
+type CacheEntry = (String, CacheKey, Config, Vec<String>);
+
+/// Like [`load_with_diagnostics`] but cached on (path, mtime, len).
+pub fn load_cached(root: &str) -> (Config, Vec<String>) {
+    static CACHE: Mutex<Option<CacheEntry>> = Mutex::new(None);
+    let key: CacheKey = candidate_paths(root)
+        .into_iter()
+        .map(|p| {
+            let meta = std::fs::metadata(&p).ok();
+            let stamp = meta.and_then(|m| Some((m.modified().ok()?, m.len())));
+            (p, stamp)
+        })
+        .collect();
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((r, k, cfg, diags)) = cache.as_ref() {
+        if r == root && *k == key {
+            return (cfg.clone(), diags.clone());
+        }
+    }
+    let (cfg, diags) = load_with_diagnostics(root);
+    *cache = Some((root.to_string(), key, cfg.clone(), diags.clone()));
+    (cfg, diags)
+}
+
+/// Load config for the repo containing the current directory (cached).
+///
+/// Kept for callers that don't carry a repo root; prefer [`load_for`].
+pub fn load() -> Config {
+    static ROOT: OnceLock<String> = OnceLock::new();
+    let root = ROOT.get_or_init(crate::collect::git::repo_root);
+    load_for(root)
 }
 
 #[cfg(test)]
@@ -134,6 +239,58 @@ mod tests {
     fn empty_is_default() {
         assert_eq!(parse(""), Config::default());
         assert_eq!(parse("garbage = ["), Config::default()); // parse error -> default
+    }
+    #[test]
+    fn parse_errors_are_reported() {
+        let (cfg, diags) = parse_with_diagnostics("garbage = [");
+        assert_eq!(cfg, Config::default());
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].contains("invalid config"), "{diags:?}");
+        let (_, diags) = parse_with_diagnostics("[[endpoints]]\nlabel = \"x\"\nport = \"nope\"");
+        assert!(diags[0].contains("invalid config"), "{diags:?}");
+    }
+    #[test]
+    fn unknown_keys_warn_but_do_not_fail() {
+        // The classic mistake: a top-level key written after `[theme]` lands
+        // inside the theme table.
+        let (cfg, diags) =
+            parse_with_diagnostics("[theme]\nmode = \"mono\"\ndiscover_endpoints = false\n");
+        assert_eq!(cfg.theme.mode.as_deref(), Some("mono"));
+        assert!(cfg.discover_endpoints, "misplaced key must not apply");
+        assert_eq!(
+            diags,
+            vec!["unknown key `theme.discover_endpoints` (ignored)"]
+        );
+        assert!(parse_with_diagnostics("discover_endpoints = false")
+            .1
+            .is_empty());
+    }
+    #[test]
+    fn candidate_paths_start_at_repo_root() {
+        let v = candidate_paths("/some/repo");
+        assert_eq!(v[0], Path::new("/some/repo/claude-cockpit.toml"));
+        assert!(v.len() <= 2);
+        assert!(v
+            .iter()
+            .skip(1)
+            .all(|p| p.ends_with("claude-cockpit/config.toml")));
+        assert!(!candidate_paths("")
+            .iter()
+            .any(|p| p.ends_with("claude-cockpit.toml")));
+    }
+    #[test]
+    fn repo_file_wins_and_is_cached_until_it_changes() {
+        let dir = std::env::temp_dir().join(format!("cockpit-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let root = dir.to_string_lossy().into_owned();
+        let f = dir.join("claude-cockpit.toml");
+        std::fs::write(&f, "discover_endpoints = false\n").unwrap();
+        assert!(!load_for(&root).discover_endpoints);
+        std::fs::write(&f, "discover_endpoints = true\nbogus = 1\n").unwrap();
+        let (cfg, diags) = load_cached(&root);
+        assert!(cfg.discover_endpoints);
+        assert!(diags[0].contains("claude-cockpit.toml") && diags[0].contains("bogus"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
     #[test]
     fn parses_theme_overrides() {
