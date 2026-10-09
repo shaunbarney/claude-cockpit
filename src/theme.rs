@@ -50,6 +50,8 @@ pub enum Level {
     Idle,
     /// Live right now — the agent that is currently working.
     Active,
+    /// Worth knowing, not a problem — e.g. commits ahead of the base branch.
+    Info,
 }
 
 impl Level {
@@ -61,6 +63,7 @@ impl Level {
             Level::Err => "✕",
             Level::Idle => "○",
             Level::Active => "◉",
+            Level::Info => "◆",
         }
     }
 }
@@ -200,6 +203,7 @@ impl Theme {
             Level::Err => self.err,
             Level::Idle => self.dim,
             Level::Active => self.accent,
+            Level::Info => self.info,
         }
     }
 

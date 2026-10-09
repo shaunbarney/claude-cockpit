@@ -8,7 +8,7 @@ use ratatui::Frame;
 
 use super::TableCtx;
 use crate::collect::jobs::Job;
-use crate::theme::Level;
+use crate::theme::{Level, Theme};
 use crate::util::{human_duration, worktree_label};
 
 /// Truncate `s` to at most `max` chars, appending `…` if it was cut.
@@ -18,6 +18,43 @@ fn truncate(s: &str, max: usize) -> String {
     }
     let cut: String = s.chars().take(max.saturating_sub(1)).collect();
     format!("{cut}…")
+}
+
+/// A working job silent for longer than this has probably stalled.
+const STALLED_SECS: i64 = 10 * 60;
+/// A job blocked on input for longer than this has been walked away from.
+const ABANDONED_SECS: i64 = 24 * 60 * 60;
+/// Worktree column width; the name column takes everything left over.
+const WT_W: u16 = 18;
+const WT_W_COMPACT: u16 = 12;
+/// Gap between columns — kept to one so the name keeps the space.
+const SPACING: u16 = 1;
+
+/// What the State column says, and at what level.
+///
+/// A blocked job is waiting for *you* — that is its own state, not a fault.
+/// What deserves a warning is a job that claims to be working but has gone
+/// quiet, and one left blocked so long it has been forgotten.
+pub fn status(j: &Job, now: i64) -> (String, Level) {
+    let silent = j.updated_at.map(|u| now - u).unwrap_or(0);
+    match j.state.as_str() {
+        "failed" | "error" => (j.state.clone(), Level::Err),
+        "done" | "completed" | "cancelled" => (j.state.clone(), Level::Idle),
+        "blocked" if silent > ABANDONED_SECS => ("abandoned".into(), Level::Idle),
+        "blocked" => ("needs input".into(), Level::Warn),
+        "working" if silent > STALLED_SECS => ("stalled".into(), Level::Warn),
+        _ if j.tempo == "active" && silent > STALLED_SECS => ("stalled".into(), Level::Warn),
+        _ if j.tempo == "active" => (j.state.clone(), Level::Active),
+        "working" => (j.state.clone(), Level::Ok),
+        _ => (j.state.clone(), Level::Idle),
+    }
+}
+
+fn state_cell(label: String, level: Level, theme: &Theme) -> Cell<'static> {
+    Cell::from(Span::styled(
+        label,
+        Style::new().fg(theme.level_color(level)),
+    ))
 }
 
 /// Render the Jobs table into `area`.
@@ -49,34 +86,30 @@ pub fn render(
         };
         return super::empty_state(f, area, " Jobs ", empty, &ctx);
     }
-    let border_style = if focused {
-        Style::new().fg(theme.focus_border)
-    } else {
-        theme.dim_style()
-    };
-
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Jobs ")
-        .border_style(border_style);
+        .border_style(theme.border_style(focused));
 
+    // The name is what identifies a job, so it gets every spare column; the
+    // worktree is fixed-width and truncated.
     let full_widths: &[Constraint] = &[
-        Constraint::Length(2), // dot
-        Constraint::Min(16),   // name
-        Constraint::Length(9), // state
-        Constraint::Length(8), // tasks
-        Constraint::Min(20),   // worktree
-        Constraint::Length(9), // age
+        Constraint::Length(2),    // dot
+        Constraint::Min(26),      // name: drop Tasks before squeezing this
+        Constraint::Length(11),   // state ("needs input")
+        Constraint::Length(5),    // tasks
+        Constraint::Length(WT_W), // worktree
+        Constraint::Length(5),    // age
     ];
     let compact_widths: &[Constraint] = &[
-        Constraint::Length(2), // dot
-        Constraint::Min(14),   // name
-        Constraint::Length(9), // state
-        Constraint::Min(16),   // worktree (truncated)
-        Constraint::Length(9), // age
+        Constraint::Length(2),            // dot
+        Constraint::Min(12),              // name
+        Constraint::Length(11),           // state
+        Constraint::Length(WT_W_COMPACT), // worktree (truncated)
+        Constraint::Length(5),            // age
     ];
 
-    let compact = super::tight(area, band, full_widths, 2);
+    let compact = super::tight(area, band, full_widths, SPACING);
     let widths = if compact { compact_widths } else { full_widths };
 
     let header = if compact {
@@ -90,34 +123,13 @@ pub fn render(
     let body: Vec<Row> = jobs
         .iter()
         .map(|j| {
-            // Dot/state colour logic.
-            let level = if j.state == "blocked" {
-                Level::Warn
-            } else if j.tempo == "active" {
-                Level::Active
-            } else if j.state == "working" {
-                Level::Ok
-            } else {
-                Level::Idle
-            };
-            let dot_color = theme.level_color(level);
-
-            // Stuck row: blocked for more than 5 minutes.
-            let stuck =
-                j.state == "blocked" && j.updated_at.map(|u| now - u > 300).unwrap_or(false);
-
-            let row_style = if stuck {
-                Style::new().fg(theme.warn)
-            } else {
-                Style::new()
-            };
-
+            let (label, level) = status(j, now);
             let dot_cell = Cell::from(theme.level_span(level));
             let name_cell = Cell::from(Span::styled(
                 j.name.clone(),
                 Style::new().add_modifier(Modifier::BOLD),
             ));
-            let state_cell = Cell::from(Span::styled(j.state.clone(), Style::new().fg(dot_color)));
+            let state_cell = state_cell(label, level, theme);
 
             // Tasks: "N" or "N+Q" dim when zero.
             let tasks_text = if j.queued > 0 {
@@ -133,21 +145,17 @@ pub fn render(
 
             // Worktree: branch (or folder name), truncated to fit.
             let wt_full = worktree_label(j.worktree_branch.as_deref(), j.worktree_path.as_deref());
-            let wt_str = if compact {
-                truncate(&wt_full, 20)
-            } else {
-                truncate(&wt_full, 40)
-            };
+            let wt_str = truncate(
+                &wt_full,
+                usize::from(if compact { WT_W_COMPACT } else { WT_W }),
+            );
             let wt_cell = Cell::from(wt_str);
 
-            // Age: "Xs ago" or dim dash.
+            // Age since last update ("22m"), or a dim dash.
             let age_cell = match j.updated_at {
                 Some(u) => {
                     let secs = (now - u).max(0) as u64;
-                    Cell::from(Span::styled(
-                        format!("{} ago", human_duration(secs)),
-                        theme.dim_style(),
-                    ))
+                    Cell::from(Span::styled(human_duration(secs), theme.dim_style()))
                 }
                 None => Cell::from(Span::styled("—", theme.dim_style())),
             };
@@ -160,14 +168,14 @@ pub fn render(
                 ]
             };
 
-            Row::new(cells).style(row_style)
+            Row::new(cells)
         })
         .collect();
     let body = super::flashed(body, flash);
 
     let table = Table::new(body, widths)
         .header(header)
-        .column_spacing(2)
+        .column_spacing(SPACING)
         .block(block)
         .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED));
 
@@ -200,6 +208,23 @@ mod tests {
             created_at: Some(0),
             updated_at: Some(100),
         }
+    }
+
+    #[test]
+    fn status_names_what_needs_attention() {
+        let mut j = job("a", "blocked");
+        j.updated_at = Some(0);
+        assert_eq!(status(&j, 60), ("needs input".into(), Level::Warn));
+        assert_eq!(status(&j, ABANDONED_SECS + 1).0, "abandoned");
+        let mut w = job("b", "working");
+        w.updated_at = Some(0);
+        assert_eq!(status(&w, 30).1, Level::Active);
+        assert_eq!(
+            status(&w, STALLED_SECS + 1),
+            ("stalled".into(), Level::Warn)
+        );
+        let f = job("c", "failed");
+        assert_eq!(status(&f, 0).1, Level::Err);
     }
 
     #[test]
