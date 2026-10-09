@@ -6,6 +6,26 @@ pub fn claude_home() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".claude"))
 }
 
+/// A `git` command that ignores repository-location variables inherited from
+/// the environment (`GIT_DIR`, `GIT_WORK_TREE`, …). Every call here names its
+/// repository with `-C`; under a git hook or `rebase -x` those variables would
+/// otherwise silently redirect it — including test fixtures — at the
+/// enclosing repository.
+pub fn git_cmd() -> std::process::Command {
+    let mut c = std::process::Command::new("git");
+    for v in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_PREFIX",
+    ] {
+        c.env_remove(v);
+    }
+    c
+}
+
 /// Bytes -> "1.5 KB" / "5.0 MB" (binary units, 1 decimal above KB).
 pub fn human_bytes(n: u64) -> String {
     const U: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];

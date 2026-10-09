@@ -6,7 +6,6 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use super::discover::{self, Suggestion};
 use super::model::Registry;
@@ -123,7 +122,7 @@ fn fill_git(row: &mut ProjectRow, root: &Path) {
 }
 
 fn git(dir: &Path, args: &[&str]) -> Option<String> {
-    let out = Command::new("git")
+    let out = crate::util::git_cmd()
         .arg("-C")
         .arg(dir)
         .args(args)
@@ -177,7 +176,7 @@ mod tests {
         let repo = temp_repo("overview");
         std::fs::write(repo.join("new.txt"), "x").unwrap();
         let wt = repo.join(".claude/worktrees/w1");
-        Command::new("git")
+        crate::util::git_cmd()
             .arg("-C")
             .arg(&repo)
             .args(["worktree", "add", "-q", "-b", "w1"])

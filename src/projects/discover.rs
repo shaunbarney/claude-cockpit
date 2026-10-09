@@ -272,7 +272,7 @@ mod tests {
     fn fold_merges_worktrees_and_skips_registered_and_hidden() {
         let repo = temp_repo("fold");
         let wt = repo.join("wt");
-        std::process::Command::new("git")
+        crate::util::git_cmd()
             .arg("-C")
             .arg(&repo)
             .args(["worktree", "add", "-q", "-b", "b"])

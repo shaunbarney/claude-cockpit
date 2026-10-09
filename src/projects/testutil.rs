@@ -1,7 +1,6 @@
 //! Throwaway git repositories for the projects tests.
 
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
@@ -19,7 +18,7 @@ pub fn temp_dir(tag: &str) -> PathBuf {
 pub fn temp_repo(tag: &str) -> PathBuf {
     let d = temp_dir(tag);
     let git = |args: &[&str]| {
-        let ok = Command::new("git")
+        let ok = crate::util::git_cmd()
             .arg("-C")
             .arg(&d)
             .args([

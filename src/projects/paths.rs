@@ -6,7 +6,6 @@
 //! them apart means a project switch never rewrites a file you hand-edit.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 const APP: &str = "claude-cockpit";
 
@@ -81,7 +80,7 @@ fn git_out(dir: &Path, args: &[&str]) -> Option<String> {
     if !dir.is_dir() {
         return None;
     }
-    let out = Command::new("git")
+    let out = crate::util::git_cmd()
         .arg("-C")
         .arg(dir)
         .args(args)
@@ -121,7 +120,7 @@ mod tests {
     fn worktree_resolves_to_its_main_repo() {
         let dir = crate::projects::testutil::temp_repo("paths-wt");
         let wt = dir.join("wt");
-        let ok = Command::new("git")
+        let ok = crate::util::git_cmd()
             .arg("-C")
             .arg(&dir)
             .args(["worktree", "add", "-q", "-b", "b1"])

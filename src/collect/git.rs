@@ -1,6 +1,5 @@
 //! Git data gathering for worktree health.
 
-use std::process::Command;
 
 /// Parse `git diff --shortstat` output into `(insertions, deletions)`.
 /// Mirrors the Python `shortstat()` regex behaviour: missing numbers are 0.
@@ -40,7 +39,7 @@ pub struct Worktree {
 /// exit status is ignored). Use [`git_ok`] where a failure must not be
 /// mistaken for an empty/zero answer.
 pub(crate) fn git(args: &[&str]) -> String {
-    Command::new("git")
+    crate::util::git_cmd()
         .args(args)
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
@@ -50,7 +49,7 @@ pub(crate) fn git(args: &[&str]) -> String {
 /// Run a git command, returning `(exit code, stdout)`; `None` if git could not
 /// be spawned. A signal-terminated process reports code `-1`.
 pub(crate) fn git_with_status(args: &[&str]) -> Option<(i32, String)> {
-    let o = Command::new("git").args(args).output().ok()?;
+    let o = crate::util::git_cmd().args(args).output().ok()?;
     Some((
         o.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&o.stdout).into_owned(),
@@ -99,7 +98,7 @@ pub fn repo_root() -> String {
 
 /// `git fetch origin --quiet` (best-effort; ignores failure, same as Python).
 pub fn fetch_origin(root: &str) {
-    let _ = Command::new("git")
+    let _ = crate::util::git_cmd()
         .args(["-C", root, "fetch", "origin", "--quiet"])
         .output();
 }
@@ -273,7 +272,6 @@ pub fn rank(r: &Worktree) -> (u8, i64) {
 pub(crate) mod test_repo {
     //! Throwaway git repos for collector tests.
     use std::path::{Path, PathBuf};
-    use std::process::Command;
     use std::sync::atomic::{AtomicU32, Ordering};
 
     static SEQ: AtomicU32 = AtomicU32::new(0);
@@ -306,7 +304,7 @@ pub(crate) mod test_repo {
 
     /// Run git in `dir`, panicking on failure; returns trimmed stdout.
     pub fn run(dir: &Path, args: &[&str]) -> String {
-        let o = Command::new("git")
+        let o = crate::util::git_cmd()
             .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c"])
             .arg("commit.gpgsign=false")
             .args(args)

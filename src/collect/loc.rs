@@ -235,7 +235,7 @@ mod tests {
         run(r.path(), &["checkout", "-q", "main"]);
         write(r.path(), "m.rs", "fn c() {}\n");
         commit_all(r.path(), "c");
-        let _ = std::process::Command::new("git")
+        let _ = crate::util::git_cmd()
             .args(["-C", &r.s(), "-c", "user.name=t", "-c", "user.email=t@t"])
             .args(["merge", "-q", "other"])
             .output();
