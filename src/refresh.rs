@@ -93,10 +93,13 @@ fn gather_all(root: &str, data: &Arc<Mutex<DashboardData>>) {
     publish_worktrees(data, wts);
     publish_loc(data, loc::loc_rows(root));
     publish_activity(data, crate::collect::activity::read_history());
-    publish_containers(data, crate::collect::docker::gather_containers());
+    // One `docker ps` feeds both widgets; the Docker widget shows the repo scope.
+    use crate::collect::docker;
+    let all = docker::gather_containers(&docker::repo_scope_roots(root));
+    publish_containers(data, docker::scoped(&all, docker::Scope::Repo));
     publish_endpoints(
         data,
-        crate::collect::ports::gather_endpoints(&crate::config::load(), root),
+        crate::collect::ports::gather_endpoints(&crate::config::load_for(root), root, &all),
     );
 }
 

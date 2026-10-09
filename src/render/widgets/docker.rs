@@ -1,6 +1,11 @@
-//! Docker widget: renders a stateful ratatui Table of running/stopped containers.
+//! Docker widget: renders a stateful ratatui Table of containers.
+//!
+//! The rows arrive already scoped (see [`crate::collect::docker::scoped`]):
+//! this repo's running containers by default. When the repo has none, the
+//! list is every container on the host and the widget says so in its bottom
+//! border, since every row then has `in_repo == false`.
 
-use ratatui::layout::{Constraint, Rect};
+use ratatui::layout::{Alignment, Constraint, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
@@ -44,6 +49,42 @@ fn health_text(c: &Container) -> &str {
     c.health.as_deref().unwrap_or(&c.state)
 }
 
+/// Shown under the caller's empty message when no filter is active.
+const EMPTY_HINT: &str = "docker not running, not installed, or no containers";
+/// Bottom-border note when the repo has no containers and all are shown.
+const FALLBACK_NOTE: &str = " no containers for this repo — showing all ";
+
+/// Draw the empty state plus a one-line hint beneath the message.
+fn render_empty(f: &mut Frame, area: Rect, ctx: &TableCtx<'_>) {
+    super::empty_state(f, area, " Docker ", ctx.empty, ctx);
+    // A filter miss explains itself; only the "nothing at all" case needs help.
+    if ctx.empty.starts_with("nothing matches") || area.height < 5 {
+        return;
+    }
+    let inner = Block::default().borders(Borders::ALL).inner(area);
+    let row = Rect {
+        y: inner.y + inner.height / 2 + 1,
+        height: 1,
+        ..inner
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(EMPTY_HINT, ctx.theme.dim_style())))
+            .alignment(Alignment::Center),
+        row,
+    );
+}
+
+/// Name column width: as wide as the longest name, within what's left over.
+fn name_width(containers: &[Container], area: Rect, others: u16) -> u16 {
+    let longest = containers
+        .iter()
+        .map(|c| c.name.chars().count())
+        .max()
+        .unwrap_or(4) as u16;
+    let room = area.width.saturating_sub(2).saturating_sub(others);
+    longest.min(room).max(8)
+}
+
 /// Render the Docker containers table into `area`.
 ///
 /// Columns (Wide/Medium): `● | Name | Health | CPU% | Mem | Ports`
@@ -55,42 +96,28 @@ pub fn render(
     ctx: TableCtx<'_>,
     state: &mut TableState,
 ) {
+    if containers.is_empty() {
+        return render_empty(f, area, &ctx);
+    }
     let TableCtx {
         theme,
         focused,
         band,
         flash,
-        empty,
+        ..
     } = ctx;
-    if containers.is_empty() {
-        let ctx = TableCtx {
-            theme,
-            focused,
-            band,
-            flash,
-            empty,
-        };
-        return super::empty_state(f, area, " Docker ", empty, &ctx);
-    }
     let border_style = if focused {
         Style::new().fg(theme.focus_border)
     } else {
         theme.dim_style()
     };
 
-    let block = Block::default()
+    let mut block = Block::default()
         .borders(Borders::ALL)
         .title(" Docker ")
         .border_style(border_style);
-
-    if containers.is_empty() {
-        let p = Paragraph::new(Line::from(Span::styled(
-            "Docker not running / no containers",
-            theme.dim_style(),
-        )))
-        .block(block);
-        f.render_widget(p, area);
-        return;
+    if containers.iter().all(|c| !c.in_repo) {
+        block = block.title_bottom(Line::from(Span::styled(FALLBACK_NOTE, theme.dim_style())));
     }
 
     let full_widths: &[Constraint] = &[
@@ -99,7 +126,7 @@ pub fn render(
         Constraint::Length(10), // health
         Constraint::Length(7),  // cpu%
         Constraint::Min(14),    // mem
-        Constraint::Min(16),    // ports
+        Constraint::Min(12),    // ports
     ];
     let compact_widths: &[Constraint] = &[
         Constraint::Length(2), // dot
@@ -109,7 +136,19 @@ pub fn render(
     ];
 
     let compact = super::tight(area, band, full_widths, 2);
-    let widths = if compact { compact_widths } else { full_widths };
+    // Everything but the name column, including the 2-col gaps.
+    let others = if compact {
+        2 + 7 + 12 + 3 * 2
+    } else {
+        2 + 10 + 7 + 14 + 12 + 5 * 2
+    };
+    let name_w = name_width(containers, area, others);
+    let mut widths: Vec<Constraint> = if compact {
+        compact_widths.to_vec()
+    } else {
+        full_widths.to_vec()
+    };
+    widths[1] = Constraint::Length(name_w);
 
     let header = if compact {
         Row::new(["", "Name", "CPU%", "Mem"]).style(Style::new().add_modifier(Modifier::BOLD))
@@ -125,7 +164,7 @@ pub fn render(
 
             let dot_cell = Cell::from(theme.level_span(row_level(c)));
             let name_cell = Cell::from(Span::styled(
-                truncate(&c.name, 24),
+                truncate(&c.name, name_w as usize),
                 Style::new().add_modifier(Modifier::BOLD),
             ));
 
@@ -191,6 +230,7 @@ mod tests {
             mem_used: 256 * 1024 * 1024,
             mem_limit: 2 * 1024 * 1024 * 1024,
             ports: vec!["0.0.0.0:8080->8080/tcp".into()],
+            ..Container::default()
         }
     }
 
@@ -263,5 +303,53 @@ mod tests {
             s.contains("no containers"),
             "expected the caller's empty message"
         );
+    }
+
+    fn draw(containers: &[Container], empty: &str, w: u16, h: u16) -> String {
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        let mut st = TableState::default();
+        let theme = Theme::default();
+        term.draw(|f| {
+            render(
+                f,
+                f.area(),
+                containers,
+                super::TableCtx {
+                    theme: &theme,
+                    focused: false,
+                    band: crate::layout::Band::Wide,
+                    flash: &[],
+                    empty,
+                },
+                &mut st,
+            )
+        })
+        .unwrap();
+        buffer_text(term.backend().buffer())
+    }
+
+    #[test]
+    fn notes_fallback_only_when_no_repo_container() {
+        let theirs = vec![running_container("other-project-db")];
+        assert!(draw(&theirs, "", 120, 8).contains("showing all"));
+        let mine = vec![Container {
+            in_repo: true,
+            ..running_container("mine")
+        }];
+        assert!(!draw(&mine, "", 120, 8).contains("showing all"));
+    }
+
+    #[test]
+    fn long_names_are_not_cut_short() {
+        let c = vec![running_container("sovrasrxproduction-victoriametrics-1")];
+        assert!(draw(&c, "", 140, 8).contains("sovrasrxproduction-victoriametrics-1"));
+    }
+
+    #[test]
+    fn empty_state_adds_hint_unless_filtered() {
+        let s = draw(&[], "no containers — is the docker daemon up?", 80, 10);
+        assert!(s.contains("docker not running"));
+        let s = draw(&[], "nothing matches “zz”", 80, 10);
+        assert!(!s.contains("docker not running"));
     }
 }
