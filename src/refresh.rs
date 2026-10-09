@@ -121,7 +121,7 @@ pub fn spawn(root: String, data: Arc<Mutex<DashboardData>>) -> Arc<AtomicBool> {
     thread::spawn(move || {
         let mut tick: u32 = 0;
         while !s.load(Ordering::Relaxed) {
-            if tick % 6 == 0 {
+            if tick.is_multiple_of(6) {
                 git::fetch_origin(&root2);
             }
             gather_all(&root2, &data2);
