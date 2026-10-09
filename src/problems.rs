@@ -30,7 +30,12 @@ pub fn report(problems: &[String]) -> Vec<String> {
             "No problems: every collector is healthy and the config parsed cleanly.".into(),
         ];
     }
-    let mut out = vec![format!("{} problem(s)", problems.len()), String::new()];
+    let noun = if problems.len() == 1 {
+        "problem"
+    } else {
+        "problems"
+    };
+    let mut out = vec![format!("{} {noun}", problems.len()), String::new()];
     out.extend(problems.iter().map(|p| format!("⚠ {p}")));
     out
 }
@@ -61,7 +66,7 @@ mod tests {
     fn report_says_when_all_is_well() {
         assert_eq!(report(&[]).len(), 1);
         let r = report(&["collector loc: x".into()]);
-        assert_eq!(r[0], "1 problem(s)");
+        assert_eq!(r[0], "1 problem");
         assert_eq!(r[2], "⚠ collector loc: x");
     }
 }

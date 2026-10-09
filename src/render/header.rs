@@ -166,7 +166,14 @@ fn segments(k: &Kpis, theme: &Theme) -> Vec<Seg> {
     if k.problems > 0 {
         out.push(seg(vec![
             Span::styled(format!("⚠ {}", k.problems), Style::new().fg(theme.warn)),
-            Span::styled(" problems", theme.muted_style()),
+            Span::styled(
+                if k.problems == 1 {
+                    " problem"
+                } else {
+                    " problems"
+                },
+                theme.muted_style(),
+            ),
         ]));
     }
 
@@ -412,6 +419,8 @@ mod tests {
         assert!(!text(&k).contains('⚠'));
         k.problems = 2;
         assert!(text(&k).contains("⚠ 2 problems"));
+        k.problems = 1;
+        assert!(text(&k).ends_with("⚠ 1 problem"));
     }
 
     #[test]
