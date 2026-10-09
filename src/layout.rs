@@ -61,7 +61,9 @@ pub fn widgets_for(b: Band) -> Vec<WidgetKind> {
 
 /// Height a widget would like, given how many content rows it has.
 pub fn want_height(content_rows: usize) -> u16 {
-    (content_rows as u16 + CHROME).clamp(MIN_ROW, MAX_ROW)
+    // Clamp before narrowing: a huge row count must not wrap round to tiny.
+    let rows = content_rows.min(usize::from(MAX_ROW)) as u16;
+    (rows + CHROME).clamp(MIN_ROW, MAX_ROW)
 }
 
 /// Split `total` across `wants`, honouring [`MIN_ROW`] and summing exactly.
@@ -178,8 +180,9 @@ pub fn place(area: Rect, kinds: &[WidgetKind], cols: usize) -> Vec<(WidgetKind, 
 #[derive(Default, Clone)]
 pub struct FrameRects {
     pub widgets: Vec<(WidgetKind, Rect)>,
-    pub table_inner: Option<Rect>,
-    pub table_offset: usize,
+    /// Inner rect of a detail screen's selectable table; it has no header, so
+    /// the first row sits at the rect's top.
+    pub detail_table: Option<Rect>,
 }
 
 impl FrameRects {
@@ -308,5 +311,7 @@ mod tests {
         assert_eq!(want_height(0), MIN_ROW);
         assert_eq!(want_height(5), 5 + CHROME);
         assert_eq!(want_height(1000), MAX_ROW);
+        // 65_536 rows would wrap to 0 under a bare `as u16`.
+        assert_eq!(want_height(65_536), MAX_ROW);
     }
 }

@@ -30,6 +30,9 @@ fn combined_files(d: &WorktreeDetail) -> Vec<(&FileChange, DiffMode)> {
 }
 
 /// Render the full-screen worktree detail view.
+///
+/// Returns the changed-files table's inner rect (no header row), so mouse
+/// clicks can be mapped onto file rows.
 pub fn render(
     f: &mut Frame,
     area: ratatui::layout::Rect,
@@ -38,7 +41,7 @@ pub fn render(
     theme: &Theme,
     file_state: &mut TableState,
     _now: i64,
-) {
+) -> ratatui::layout::Rect {
     // Top: 4-line activity + merge block; bottom: files (left) + commits (right).
     let vert = Layout::vertical([Constraint::Length(4), Constraint::Min(0)]).split(area);
     let horiz =
@@ -47,6 +50,18 @@ pub fn render(
     render_activity(f, vert[0], detail, jobs, theme);
     render_files(f, horiz[0], detail, theme, file_state);
     render_commits(f, horiz[1], detail, theme);
+    Block::default().borders(Borders::ALL).inner(horiz[0])
+}
+
+/// The job working in this worktree: matched by path (branch names are reused
+/// across worktrees and say nothing), preferring a live job over a finished one.
+fn owning_job<'a>(jobs: &'a [Job], path: &str) -> Option<&'a Job> {
+    let mut mine = jobs
+        .iter()
+        .filter(|j| j.worktree_path.as_deref() == Some(path));
+    let first = mine.clone().next();
+    mine.find(|j| !matches!(j.state.as_str(), "done" | "failed" | "error" | "cancelled"))
+        .or(first)
 }
 
 fn render_activity(
@@ -65,11 +80,7 @@ fn render_activity(
     f.render_widget(block, area);
 
     // Activity line: find the job owning this worktree.
-    let owning_job = jobs.iter().find(|j| {
-        j.worktree_path.as_deref() == Some(detail.path.as_str())
-            || j.worktree_branch.as_deref() == Some(detail.branch.as_str())
-    });
-    let activity_line = match owning_job {
+    let activity_line = match owning_job(jobs, &detail.path) {
         Some(j) => {
             let state_style = match j.state.as_str() {
                 "working" => Style::new().fg(theme.ok),
@@ -143,7 +154,11 @@ fn render_files(
         ],
     )
     .block(block)
-    .row_highlight_style(Style::new().fg(theme.accent));
+    .row_highlight_style(
+        Style::new()
+            .fg(theme.accent)
+            .add_modifier(ratatui::style::Modifier::REVERSED),
+    );
 
     f.render_stateful_widget(table, area, file_state);
 }
@@ -211,6 +226,43 @@ mod tests {
             }],
             merge: MergeStatus::Clean,
         }
+    }
+
+    fn job(path: &str, state: &str, name: &str) -> Job {
+        Job {
+            id: name.into(),
+            name: name.into(),
+            state: state.into(),
+            tempo: "idle".into(),
+            intent: String::new(),
+            tasks: 0,
+            queued: 0,
+            cwd: String::new(),
+            worktree_path: Some(path.into()),
+            worktree_branch: Some("main".into()),
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn owning_job_matches_path_and_prefers_live_jobs() {
+        let jobs = vec![
+            job("/w/a", "done", "old"),
+            job("/w/b", "working", "other"),
+            job("/w/a", "working", "live"),
+        ];
+        assert_eq!(
+            owning_job(&jobs, "/w/a").map(|j| j.name.as_str()),
+            Some("live")
+        );
+        // A shared branch name is not ownership.
+        assert!(owning_job(&jobs, "/w/c").is_none());
+        let done_only = vec![job("/w/a", "done", "old")];
+        assert_eq!(
+            owning_job(&done_only, "/w/a").map(|j| j.name.as_str()),
+            Some("old")
+        );
     }
 
     #[test]

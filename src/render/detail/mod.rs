@@ -6,5 +6,6 @@ pub mod cost;
 pub mod diff;
 pub mod job;
 pub mod ports;
+pub mod screen;
 pub mod skills;
 pub mod worktree;

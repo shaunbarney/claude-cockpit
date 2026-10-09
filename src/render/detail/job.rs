@@ -13,7 +13,7 @@ use crate::theme::Theme;
 use crate::util::{human_duration, worktree_label};
 
 /// Header height: four content lines plus the border.
-const HEADER_H: u16 = 6;
+pub const HEADER_H: u16 = 6;
 
 /// Colour a state string using theme semantics.
 fn state_style(state: &str, theme: &Theme) -> Style {

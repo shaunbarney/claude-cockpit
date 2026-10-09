@@ -10,17 +10,19 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
+use std::time::{Duration, Instant};
 
 pub(crate) static REFRESH_INFLIGHT: AtomicBool = AtomicBool::new(false);
 
 use ratatui::crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
-use ratatui::widgets::{Block, Borders};
+use ratatui::widgets::{Block, Borders, TableState};
 
-use crate::app::{App, Detail, DiffView, Mode, View};
+use crate::app::{App, Detail, DiffView, Loaded, Mode, View};
 use crate::collect::git_detail::{self, DiffMode};
 use crate::palette::{self, Command};
 use crate::refresh;
+use crate::rows::TableRow;
 use crate::view;
 use crate::widget::WidgetKind;
 
@@ -122,12 +124,12 @@ fn row_count(app: &App, kind: WidgetKind) -> usize {
     app.visible_count(kind)
 }
 
-fn move_selection(app: &mut App, delta: isize) {
-    let n = row_count(app, app.focus);
+fn move_selection_of(app: &mut App, kind: WidgetKind, delta: isize) {
+    let n = row_count(app, kind);
     if n == 0 {
         return;
     }
-    let st = app.focus_ui_mut();
+    let st = app.ui_mut(kind);
     let cur = st.table.selected().unwrap_or(0) as isize;
     let next = (cur + delta).clamp(0, n as isize - 1) as usize;
     st.table.select(Some(next));
@@ -161,63 +163,116 @@ fn combined_files(d: &git_detail::WorktreeDetail) -> Vec<(String, DiffMode)> {
     v
 }
 
-fn wt_file_count(app: &App) -> usize {
-    app.wt_detail
-        .as_ref()
-        .map(|d| d.uncommitted_files.len() + d.committed_files.len())
-        .unwrap_or(0)
+/// Row count of the open detail screen's selectable table, or `None` when the
+/// detail is a scrolling text view instead.
+fn detail_rows(app: &App) -> Option<usize> {
+    match &app.view {
+        View::Detail(Detail::Worktree) => Some(
+            app.wt_detail
+                .as_ref()
+                .map(|d| d.uncommitted_files.len() + d.committed_files.len())
+                .unwrap_or(0),
+        ),
+        View::Detail(Detail::Cost) => Some(
+            app.data
+                .lock()
+                .unwrap()
+                .usage
+                .as_ref()
+                .map(|u| u.by_model.len())
+                .unwrap_or(0),
+        ),
+        _ => None,
+    }
+}
+
+/// (Re)request the open worktree's detail on a worker thread.
+fn request_worktree_detail(app: &mut App, wt: crate::collect::git::Worktree) {
+    app.wt_path = Some(wt.path.clone());
+    app.wt_requested = Some(Instant::now());
+    app.spawn_load(move |token| Loaded::Worktree {
+        token,
+        detail: git_detail::worktree_detail(&wt.path, &wt.name, &wt.branch),
+    });
+}
+
+/// How stale an open worktree detail may get before a data refresh re-reads it.
+const WT_DETAIL_TTL: Duration = Duration::from_secs(10);
+
+/// Re-read the open worktree detail after a data refresh, at most every
+/// [`WT_DETAIL_TTL`] — its `git` calls are too heavy for every 2 s jobs tick.
+pub fn refresh_worktree_detail(app: &mut App) {
+    if !matches!(app.view, View::Detail(Detail::Worktree)) || app.loading {
+        return;
+    }
+    if app
+        .wt_requested
+        .is_some_and(|t| t.elapsed() < WT_DETAIL_TTL)
+    {
+        return;
+    }
+    let Some(path) = app.wt_path.clone() else {
+        return;
+    };
+    let wt = {
+        let d = app.data.lock().unwrap();
+        d.worktrees.iter().find(|w| w.path == path).cloned()
+    };
+    if let Some(wt) = wt {
+        request_worktree_detail(app, wt);
+    }
 }
 
 fn open_worktree_detail(app: &mut App) {
-    let Some(idx) = app.selected_data_index(WidgetKind::Worktrees) else {
+    let Some(key) = app.selected_key(WidgetKind::Worktrees) else {
         return;
     };
-    let wt = app.data.lock().unwrap().worktrees.get(idx).cloned();
+    let wt = {
+        let d = app.data.lock().unwrap();
+        d.worktrees.iter().find(|w| w.key() == key).cloned()
+    };
     let Some(wt) = wt else { return };
-    let detail = git_detail::worktree_detail(&wt.path, &wt.name, &wt.branch);
-    app.wt_detail = Some(detail);
-    app.last_wt_idx = Some(idx);
-    app.detail_table = ratatui::widgets::TableState::default();
+    app.wt_detail = None;
+    app.detail_table = TableState::default();
     app.detail_table.select(Some(0));
-    app.view = View::Detail(Detail::Worktree);
+    app.open_detail(Detail::Worktree);
+    request_worktree_detail(app, wt);
 }
 
 fn open_container_detail(app: &mut App) {
-    let Some(idx) = app.selected_data_index(WidgetKind::Docker) else {
+    let Some(id) = app.selected_key(WidgetKind::Docker) else {
         return;
     };
-    let c = app.data.lock().unwrap().containers.get(idx).cloned();
-    let Some(c) = c else { return };
-    app.container_logs = crate::collect::docker::container_logs(&c.id, 300);
-    app.view = View::Detail(Detail::Container(idx));
-    app.detail_scroll = 0;
+    app.container_logs.clear();
+    app.open_detail(Detail::Container(id.clone()));
+    app.spawn_load(move |token| Loaded::Logs {
+        token,
+        lines: crate::collect::docker::container_logs(&id, 300),
+    });
 }
 
 fn open_cost_detail(app: &mut App) {
     if app.data.lock().unwrap().usage.is_none() {
         return;
     }
-    app.detail_table = ratatui::widgets::TableState::default();
+    app.detail_table = TableState::default();
     app.detail_table.select(Some(0));
-    app.detail_scroll = 0;
-    app.view = View::Detail(Detail::Cost);
+    app.open_detail(Detail::Cost);
 }
 
 fn open_cost_model(app: &mut App) {
     let Some(sel) = app.detail_table.selected() else {
         return;
     };
-    let n = app
+    let model = app
         .data
         .lock()
         .unwrap()
         .usage
         .as_ref()
-        .map(|u| u.by_model.len())
-        .unwrap_or(0);
-    if sel < n {
-        app.view = View::Detail(Detail::CostModel(sel));
-        app.detail_scroll = 0;
+        .and_then(|u| u.by_model.get(sel).map(|m| m.model.clone()));
+    if let Some(m) = model {
+        app.open_detail(Detail::CostModel(m));
     }
 }
 
@@ -229,20 +284,29 @@ fn open_file_diff(app: &mut App) {
         return;
     };
     let files = combined_files(&detail);
-    let Some((path, mode)) = files.get(sel) else {
+    let Some((path, mode)) = files.get(sel).cloned() else {
         return;
     };
-    let lines = git_detail::file_diff(&detail.path, path, *mode);
     let label = match mode {
         DiffMode::Staged => "staged",
         DiffMode::Unstaged => "unstaged",
         DiffMode::Committed => "committed",
     };
-    app.view = View::Detail(Detail::Diff(DiffView {
-        title: format!("{} · {}", path, label),
-        lines,
+    let title = format!("{path} · {label}");
+    app.open_detail(Detail::Diff(DiffView {
+        title: title.clone(),
+        lines: Vec::new(),
+        loading: true,
     }));
-    app.detail_scroll = 0;
+    let root = detail.path.clone();
+    app.spawn_load(move |token| Loaded::Diff {
+        token,
+        view: DiffView {
+            title,
+            lines: git_detail::file_diff(&root, &path, mode),
+            loading: false,
+        },
+    });
 }
 
 #[derive(Clone, Copy)]
@@ -295,51 +359,38 @@ fn focus_dir(app: &mut App, dir: Dir) {
     }
 }
 
-/// In-widget "up": detail row-select / scroll, or dashboard table row-select.
-fn select_up(app: &mut App, step: isize) {
-    match &app.view {
-        View::Detail(Detail::Worktree) | View::Detail(Detail::Cost) => {
-            let s = app.detail_table.selected().unwrap_or(0);
-            app.detail_table
-                .select(Some(s.saturating_sub(step as usize)));
+/// Move within the current screen by `delta` rows: a detail table's cursor, a
+/// detail's scroll, or the focused dashboard table's selection.
+fn step(app: &mut App, delta: isize) {
+    match detail_rows(app) {
+        Some(n) => {
+            if n > 0 {
+                let s = app.detail_table.selected().unwrap_or(0) as isize;
+                let next = (s + delta).clamp(0, n as isize - 1) as usize;
+                app.detail_table.select(Some(next));
+            }
         }
-        View::Detail(_) => {
-            app.detail_scroll = app.detail_scroll.saturating_sub(step as u16);
+        None if matches!(app.view, View::Detail(_)) => {
+            let v = (app.detail_scroll as isize + delta).clamp(0, u16::MAX as isize) as u16;
+            app.set_detail_scroll(v);
         }
-        _ => move_selection(app, -step),
+        None => move_selection_of(app, app.focus, delta),
     }
 }
 
-/// In-widget "down": counterpart to [`select_up`].
-fn select_down(app: &mut App, step: isize) {
-    match &app.view {
-        View::Detail(Detail::Worktree) => {
-            let n = wt_file_count(app);
+/// g/G, Home/End: the ends of whatever the current screen scrolls.
+fn jump(app: &mut App, to_end: bool) {
+    match detail_rows(app) {
+        Some(n) => {
             if n > 0 {
-                let s = app.detail_table.selected().unwrap_or(0);
                 app.detail_table
-                    .select(Some((s + step as usize).min(n - 1)));
+                    .select(Some(if to_end { n - 1 } else { 0 }));
             }
         }
-        View::Detail(Detail::Cost) => {
-            let n = app
-                .data
-                .lock()
-                .unwrap()
-                .usage
-                .as_ref()
-                .map(|u| u.by_model.len())
-                .unwrap_or(0);
-            if n > 0 {
-                let s = app.detail_table.selected().unwrap_or(0);
-                app.detail_table
-                    .select(Some((s + step as usize).min(n - 1)));
-            }
+        None if matches!(app.view, View::Detail(_)) => {
+            app.detail_scroll = if to_end { app.detail_max } else { 0 };
         }
-        View::Detail(_) => {
-            app.detail_scroll = app.detail_scroll.saturating_add(step as u16);
-        }
-        _ => move_selection(app, step),
+        None => jump_selection(app, to_end),
     }
 }
 
@@ -363,8 +414,17 @@ pub fn refreshing() -> bool {
     REFRESH_INFLIGHT.load(Ordering::Relaxed)
 }
 
+/// Filter and sort act on the focused widget's rows, so they only mean
+/// something while those rows are on screen and the widget has rows at all.
+fn table_ops(app: &App) -> bool {
+    app.table_view() && view::is_table(app.focus)
+}
+
 /// Advance the focused widget's sort to the next column, wrapping to default.
 fn cycle_sort(app: &mut App) {
+    if !table_ops(app) {
+        return;
+    }
     let n = view::sort_columns(app.focus).len();
     let st = app.focus_ui_mut();
     st.sort_col = (st.sort_col + 1) % n.max(1);
@@ -372,6 +432,9 @@ fn cycle_sort(app: &mut App) {
 }
 
 fn reverse_sort(app: &mut App) {
+    if !table_ops(app) {
+        return;
+    }
     let st = app.focus_ui_mut();
     // Reversing while on the collector's own order is meaningless; step onto
     // the first real column so the key always does something visible.
@@ -383,9 +446,21 @@ fn reverse_sort(app: &mut App) {
     app.refilter();
 }
 
+fn begin_filter(app: &mut App) {
+    if table_ops(app) {
+        app.mode = Mode::Filter;
+        app.input = app.filter_of(app.focus).to_string();
+    }
+}
+
+fn clear_filter(app: &mut App) {
+    app.focus_ui_mut().filter.clear();
+    app.refilter();
+}
+
 /// The palette entries plus the indices matching the current input.
 pub fn palette_state(app: &mut App) -> (Vec<palette::Entry>, Vec<usize>) {
-    let entries = palette::registry(app.focus);
+    let entries = palette::registry(app.focus, table_ops(app));
     let input = app.input.clone();
     let hits = palette::search(&entries, &input, &mut app.fuzzy);
     (entries, hits)
@@ -393,23 +468,20 @@ pub fn palette_state(app: &mut App) -> (Vec<palette::Entry>, Vec<usize>) {
 
 fn run_command(app: &mut App, cmd: Command, root: &str) {
     match cmd {
-        Command::Focus(k) => {
-            app.focus = k;
-            app.view = View::Dashboard;
-        }
+        Command::Focus(k) => app.focus_widget(k),
         Command::Expand => app.expand_focused(),
         Command::Drill => apply(app, Action::Drill, root),
-        Command::Filter => {
-            app.mode = Mode::Filter;
-            app.input = app.filter_of(app.focus).to_string();
-        }
+        Command::Filter => begin_filter(app),
         Command::ClearFilter => {
-            app.focus_ui_mut().filter.clear();
-            app.refilter();
+            if table_ops(app) {
+                clear_filter(app);
+            }
         }
         Command::Sort(col) => {
-            app.focus_ui_mut().sort_col = col;
-            app.refilter();
+            if table_ops(app) {
+                app.focus_ui_mut().sort_col = col;
+                app.refilter();
+            }
         }
         Command::Refresh => kick_refresh(app, root),
         Command::Help => app.show_help = !app.show_help,
@@ -442,8 +514,7 @@ fn escape(app: &mut App) {
             // Cancel restores the unfiltered view; Enter is how you keep it.
             app.mode = Mode::Normal;
             app.input.clear();
-            app.focus_ui_mut().filter.clear();
-            app.refilter();
+            clear_filter(app);
         }
         Mode::Palette => {
             app.mode = Mode::Normal;
@@ -451,11 +522,8 @@ fn escape(app: &mut App) {
             app.palette_sel = 0;
         }
         Mode::Normal => {
-            if app.show_help {
-                app.show_help = false;
-            } else if !app.filter_of(app.focus).is_empty() && matches!(app.view, View::Dashboard) {
-                app.focus_ui_mut().filter.clear();
-                app.refilter();
+            if app.table_view() && !app.filter_of(app.focus).is_empty() {
+                clear_filter(app);
             } else {
                 app.back();
             }
@@ -463,41 +531,44 @@ fn escape(app: &mut App) {
     }
 }
 
+/// While the help sheet is up it is modal: it can be closed, or the app quit,
+/// and nothing else reaches the screen hidden beneath it.
+fn apply_in_help(app: &mut App, action: Action) {
+    match action {
+        Action::Help | Action::Back => app.show_help = false,
+        Action::Quit => app.should_quit = true,
+        _ => {}
+    }
+}
+
 pub fn apply(app: &mut App, action: Action, root: &str) {
+    if app.show_help {
+        return apply_in_help(app, action);
+    }
     match action {
         Action::Quit => app.should_quit = true,
         Action::Refresh => kick_refresh(app, root),
         Action::FocusNext => app.focus_next(),
         Action::FocusPrev => app.focus_prev(),
-        Action::FocusUp => {
+        Action::FocusUp | Action::FocusDown => {
+            let up = action == Action::FocusUp;
             if matches!(app.view, View::Dashboard) && app.mode == Mode::Normal {
-                focus_dir(app, Dir::Up);
+                focus_dir(app, if up { Dir::Up } else { Dir::Down });
             } else {
-                select_up(app, 1);
+                step(app, if up { -1 } else { 1 });
             }
         }
-        Action::FocusDown => {
-            if matches!(app.view, View::Dashboard) && app.mode == Mode::Normal {
-                focus_dir(app, Dir::Down);
-            } else {
-                select_down(app, 1);
-            }
-        }
-        Action::FocusLeft => {
+        Action::FocusLeft | Action::FocusRight => {
             if matches!(app.view, View::Dashboard) {
-                focus_dir(app, Dir::Left);
-            }
-        }
-        Action::FocusRight => {
-            if matches!(app.view, View::Dashboard) {
-                focus_dir(app, Dir::Right);
+                let left = action == Action::FocusLeft;
+                focus_dir(app, if left { Dir::Left } else { Dir::Right });
             }
         }
         Action::Up => {
             if app.mode == Mode::Palette {
                 app.palette_sel = app.palette_sel.saturating_sub(1);
             } else {
-                select_up(app, 1)
+                step(app, -1)
             }
         }
         Action::Down => {
@@ -505,22 +576,17 @@ pub fn apply(app: &mut App, action: Action, root: &str) {
                 let (_, hits) = palette_state(app);
                 app.palette_sel = (app.palette_sel + 1).min(hits.len().saturating_sub(1));
             } else {
-                select_down(app, 1)
+                step(app, 1)
             }
         }
-        Action::Top => jump_selection(app, false),
-        Action::Bottom => jump_selection(app, true),
-        Action::PageUp => select_up(app, 10),
-        Action::PageDown => select_down(app, 10),
+        Action::Top => jump(app, false),
+        Action::Bottom => jump(app, true),
+        Action::PageUp => step(app, -10),
+        Action::PageDown => step(app, 10),
         Action::Expand => app.expand_focused(),
-        Action::Help => app.show_help = !app.show_help,
+        Action::Help => app.show_help = true,
         Action::Back => escape(app),
-        Action::BeginFilter => {
-            if view::is_table(app.focus) {
-                app.mode = Mode::Filter;
-                app.input = app.filter_of(app.focus).to_string();
-            }
-        }
+        Action::BeginFilter => begin_filter(app),
         Action::BeginPalette => {
             app.mode = Mode::Palette;
             app.input.clear();
@@ -563,80 +629,121 @@ pub fn apply(app: &mut App, action: Action, root: &str) {
     }
 }
 
+/// Open a row-backed detail for the focused widget's selection.
+fn drill_key(app: &mut App, kind: WidgetKind, make: fn(String) -> Detail) {
+    if let Some(key) = app.selected_key(kind) {
+        app.open_detail(make(key));
+    }
+}
+
 /// Open the detail view for the focused widget's selection.
 fn drill(app: &mut App) {
     match app.focus {
         WidgetKind::Worktrees => open_worktree_detail(app),
         WidgetKind::Docker => open_container_detail(app),
         WidgetKind::Cost => open_cost_detail(app),
-        WidgetKind::Jobs => {
-            if let Some(idx) = app.selected_data_index(WidgetKind::Jobs) {
-                app.view = View::Detail(Detail::Job(idx));
-                app.detail_scroll = 0;
-            }
-        }
-        WidgetKind::Ports => {
-            if let Some(idx) = app.selected_data_index(WidgetKind::Ports) {
-                app.view = View::Detail(Detail::Ports(idx));
-                app.detail_scroll = 0;
-            }
-        }
-        WidgetKind::Repo => {
-            // The Repo slot hosts the Skills table — drill into a skill.
-            if let Some(idx) = app.selected_data_index(WidgetKind::Repo) {
-                app.view = View::Detail(Detail::Repo(idx));
-                app.detail_scroll = 0;
-            }
-        }
+        WidgetKind::Jobs => drill_key(app, WidgetKind::Jobs, Detail::Job),
+        WidgetKind::Ports => drill_key(app, WidgetKind::Ports, Detail::Ports),
+        WidgetKind::Repo => drill_key(app, WidgetKind::Repo, Detail::Repo),
         WidgetKind::Activity => {
             let has = {
                 let d = app.data.lock().unwrap();
                 d.usage.is_some() || !d.activity.is_empty()
             };
             if has {
-                app.view = View::Detail(Detail::Activity);
-                app.detail_scroll = 0;
+                app.open_detail(Detail::Activity);
             }
         }
         WidgetKind::Code => {
             if !app.data.lock().unwrap().loc.is_empty() {
-                app.view = View::Detail(Detail::Code);
-                app.detail_scroll = 0;
+                app.open_detail(Detail::Code);
             }
         }
         WidgetKind::Procs => {} // Tools widget — nothing deeper to show
     }
 }
 
+/// Left click on the dashboard: focus and select; a click on what is already
+/// focused and selected opens it, like a double-click.
+fn click_dashboard(app: &mut App, pos: Position, root: &str) {
+    let Some(kind) = app.rects.widget_at(pos) else {
+        return;
+    };
+    let was_focused = app.focus == kind;
+    app.focus = kind;
+    if !view::is_table(kind) {
+        if was_focused {
+            apply(app, Action::Drill, root);
+        }
+        return;
+    }
+    let Some((_, outer)) = app.rects.widgets.iter().find(|(k, _)| *k == kind).copied() else {
+        return;
+    };
+    let inner = Block::default().borders(Borders::ALL).inner(outer);
+    if !inner.contains(pos) {
+        return;
+    }
+    let Some(row) = row_at(inner, app.ui_offset(kind), pos.y) else {
+        return;
+    };
+    if row >= row_count(app, kind) {
+        return;
+    }
+    let st = app.ui_mut(kind);
+    let again = was_focused && st.table.selected() == Some(row);
+    st.table.select(Some(row));
+    if again {
+        apply(app, Action::Drill, root);
+    }
+}
+
+/// Left click inside a detail screen's table: select, or open on a re-click.
+fn click_detail(app: &mut App, pos: Position, root: &str) {
+    let Some(inner) = app.rects.detail_table else {
+        return;
+    };
+    if !inner.contains(pos) {
+        return;
+    }
+    // Detail tables have no header row: the first row is the rect's top line.
+    let row = app.detail_table.offset() + (pos.y - inner.y) as usize;
+    if row >= detail_rows(app).unwrap_or(0) {
+        return;
+    }
+    let again = app.detail_table.selected() == Some(row);
+    app.detail_table.select(Some(row));
+    if again {
+        apply(app, Action::Drill, root);
+    }
+}
+
 pub fn handle_mouse(app: &mut App, m: MouseEvent, root: &str) {
+    // Overlays are modal: nothing behind them may react to the pointer.
+    if app.show_help || app.mode == Mode::Palette {
+        return;
+    }
     let pos = Position {
         x: m.column,
         y: m.row,
     };
-    match m.kind {
+    let delta = match m.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            if let Some(kind) = app.rects.widget_at(pos) {
-                app.focus = kind;
-                if view::is_table(kind) {
-                    if let Some((_, outer)) =
-                        app.rects.widgets.iter().find(|(k, _)| *k == kind).copied()
-                    {
-                        let inner = Block::default().borders(Borders::ALL).inner(outer);
-                        if inner.contains(pos) {
-                            let offset = app.ui_offset(kind);
-                            if let Some(row) = row_at(inner, offset, pos.y) {
-                                if row < row_count(app, kind) {
-                                    app.ui_mut(kind).table.select(Some(row));
-                                }
-                            }
-                        }
-                    }
-                }
+            if app.table_view() {
+                click_dashboard(app, pos, root);
+            } else {
+                click_detail(app, pos, root);
             }
+            return;
         }
-        MouseEventKind::ScrollDown => apply(app, Action::Down, root),
-        MouseEventKind::ScrollUp => apply(app, Action::Up, root),
-        _ => {}
+        MouseEventKind::ScrollDown => 1,
+        MouseEventKind::ScrollUp => -1,
+        _ => return,
+    };
+    // The wheel scrolls whatever is under the pointer, as everywhere else.
+    match app.rects.widget_at(pos) {
+        Some(k) if app.table_view() => move_selection_of(app, k, delta),
+        _ => step(app, delta),
     }
 }
 
@@ -869,7 +976,7 @@ mod tests {
         apply(&mut app, Action::Drill, ".");
         // gamma is data row 2, displayed at row 0.
         match app.view {
-            View::Detail(Detail::Job(i)) => assert_eq!(i, 2),
+            View::Detail(Detail::Job(ref id)) => assert_eq!(id, "3"),
             _ => panic!("expected the job detail for gamma"),
         }
     }
@@ -961,7 +1068,7 @@ mod tests {
         apply(&mut app, Action::Drill, ".");
         assert!(matches!(app.view, View::Detail(Detail::Cost)));
         apply(&mut app, Action::Drill, ".");
-        assert!(matches!(app.view, View::Detail(Detail::CostModel(0))));
+        assert!(matches!(&app.view, View::Detail(Detail::CostModel(m)) if m == "claude-x"));
         apply(&mut app, Action::Back, ".");
         assert!(matches!(app.view, View::Detail(Detail::Cost)));
         apply(&mut app, Action::Back, ".");
@@ -985,7 +1092,7 @@ mod tests {
         app.focus = WidgetKind::Repo;
         app.sync();
         apply(&mut app, Action::Drill, ".");
-        assert!(matches!(app.view, View::Detail(Detail::Repo(0))));
+        assert!(matches!(&app.view, View::Detail(Detail::Repo(k)) if k == "personal/deploy"));
         apply(&mut app, Action::Back, ".");
         assert!(matches!(app.view, View::Dashboard));
     }
