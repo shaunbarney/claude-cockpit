@@ -199,6 +199,7 @@ mod tests {
             worktree_branch: Some("feat/demo".into()),
             created_at: Some(0),
             updated_at: Some(100),
+            ..Default::default()
         }
     }
 

@@ -660,6 +660,7 @@ mod tests {
             worktree_branch: None,
             created_at: Some(0),
             updated_at: Some(0),
+            ..Default::default()
         }
     }
 
