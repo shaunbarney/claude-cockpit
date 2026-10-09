@@ -162,7 +162,11 @@ pub fn github_names(path: &Path) -> HashMap<PathBuf, String> {
     out
 }
 
-/// One `(cwd, newest mtime)` per transcript folder.
+/// One `(cwd, newest transcript mtime)` per Claude Code transcript folder.
+pub fn activity_by_cwd(projects: &Path) -> Vec<(PathBuf, i64)> {
+    transcript_dirs(projects)
+}
+
 fn transcript_dirs(projects: &Path) -> Vec<(PathBuf, i64)> {
     let Ok(rd) = std::fs::read_dir(projects) else {
         return Vec::new();

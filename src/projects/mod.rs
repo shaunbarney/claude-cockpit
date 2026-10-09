@@ -7,7 +7,9 @@
 pub mod cli;
 pub mod discover;
 pub mod model;
+pub mod overview;
 pub mod paths;
+pub mod picker;
 pub mod resolve;
 pub mod store;
 

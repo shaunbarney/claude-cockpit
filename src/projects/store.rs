@@ -134,9 +134,12 @@ pub fn load_state() -> State {
 }
 
 pub fn save_state(st: &State) -> Result<(), ProjectError> {
-    let path = state_file().ok_or_else(no_home)?;
+    save_state_to(&state_file().ok_or_else(no_home)?, st)
+}
+
+pub fn save_state_to(path: &Path, st: &State) -> Result<(), ProjectError> {
     let body = toml::to_string_pretty(st).map_err(|e| ProjectError::Io(e.to_string()))?;
-    write_atomic(&path, &body)
+    write_atomic(path, &body)
 }
 
 #[cfg(test)]
