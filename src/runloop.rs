@@ -9,7 +9,7 @@
 
 use std::io;
 use std::sync::atomic::Ordering;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::thread::{self, ThreadId};
 use std::time::Duration;
 
@@ -18,10 +18,12 @@ use ratatui::crossterm::event::{
 };
 use ratatui::crossterm::execute;
 
+use crate::active::ActiveProject;
 use crate::anim;
 use crate::app::App;
 use crate::config;
 use crate::event::{apply, handle_mouse, map_key, refresh_worktree_detail, refreshing};
+use crate::projects::host;
 use crate::refresh;
 use crate::theme::Theme;
 
@@ -63,7 +65,7 @@ fn install_panic_hook() {
 /// Enter alt-screen + mouse capture, run the loop, restore on exit (including
 /// a panic on the UI thread — see [`install_panic_hook`]).
 pub fn run(root: &str) -> io::Result<()> {
-    let cfg = config::load();
+    let cfg = config::load_for(root);
     let mut term = ratatui::init();
     install_panic_hook();
     if let Err(e) = execute!(io::stdout(), EnableMouseCapture) {
@@ -71,8 +73,18 @@ pub fn run(root: &str) -> io::Result<()> {
         return Err(e);
     }
     let mut app = App::new(Theme::from_config(&cfg.theme));
-    let stop = refresh::spawn(root.to_string(), app.data.clone());
-    let res = event_loop(&mut term, &mut app, root);
+    let name = host::alias_for(std::path::Path::new(root)).unwrap_or_default();
+    let active = Arc::new(ActiveProject::new(root, &name));
+    app.project_list = host::project_list();
+    if root.is_empty() {
+        // Nothing to show yet: start in the picker.
+        host::open(&mut app, root);
+    } else {
+        host::remember(std::path::Path::new(root));
+    }
+    let stop = refresh::spawn(active.clone(), app.data.clone());
+    host::spawn_overview(app.data.clone(), stop.clone());
+    let res = event_loop(&mut term, &mut app, &active);
     stop.store(true, Ordering::Relaxed);
     restore_terminal();
     res
@@ -81,7 +93,7 @@ pub fn run(root: &str) -> io::Result<()> {
 fn event_loop<B: ratatui::backend::Backend>(
     term: &mut ratatui::Terminal<B>,
     app: &mut App,
-    root: &str,
+    active: &ActiveProject,
 ) -> io::Result<()>
 where
     io::Error: From<B::Error>,
@@ -94,6 +106,7 @@ where
         if rev != last_rev {
             // New data: work out what changed, refilter, and redraw.
             app.sync();
+            host::sync(app);
             refresh_worktree_detail(app);
             last_rev = rev;
             dirty = true;
@@ -117,14 +130,25 @@ where
         let timeout = if animating { anim::FRAME } else { IDLE_POLL };
 
         if event::poll(timeout)? {
+            let root = active.root();
+            let root = root.as_str();
             match event::read()? {
+                Event::Key(k) if k.kind == KeyEventKind::Press && app.picker.is_some() => {
+                    host::key(app, k.code, k.modifiers);
+                }
                 Event::Key(k) if k.kind == KeyEventKind::Press => {
                     let a = map_key(k.code, k.modifiers, app.mode);
                     apply(app, a, root);
                 }
+                // The picker is modal: clicks and scrolls don't reach the dashboard.
+                Event::Mouse(_) if app.picker.is_some() => {}
                 Event::Mouse(m) => handle_mouse(app, m, root),
                 Event::Resize(_, _) => {}
                 _ => {}
+            }
+            if let Some(next) = app.pending_switch.take() {
+                host::switch(app, active, &next);
+                refresh::request_now();
             }
             dirty = true;
         } else if animating {

@@ -15,12 +15,12 @@
 use std::collections::BTreeMap;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Once};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
+use crate::active::ActiveProject;
 use crate::app::DashboardData;
 use crate::collect::docker::{self, Container, Scope};
 use crate::collect::git::{self, Worktree};
@@ -220,7 +220,7 @@ pub fn fetch_origin_bounded(root: &str) {
         return;
     }
     let _ = output_with_timeout(
-        Command::new("git")
+        crate::util::git_cmd()
             .args(["-C", root, "fetch", "origin", "--quiet"])
             .env("GIT_TERMINAL_PROMPT", "0"),
         FETCH_TIMEOUT,
@@ -258,17 +258,30 @@ impl LocCache {
 #[derive(Default)]
 struct SlowState {
     loc: LocCache,
+    /// Registered alias of the project, shown in the header instead of the
+    /// folder name.
+    name: String,
 }
 
 /// Gather everything except the network `git fetch` and publish it. This is the
 /// per-tick work of the slow loop; `git fetch` is throttled separately.
 /// (Skill usage is scanned on the cost thread, alongside the transcript walk.)
 /// With no repo (`root` empty) the git-backed slices are skipped.
-fn gather_all(root: &str, data: &Arc<Mutex<DashboardData>>, st: &mut SlowState) {
+fn gather_all(
+    root: &str,
+    data: &Arc<Mutex<DashboardData>>,
+    st: &mut SlowState,
+    live: &dyn Fn() -> bool,
+) {
     let has_repo = !root.is_empty();
     if has_repo {
-        if let Some(info) = guarded("repo", || git::repo_info(root)) {
-            publish_repo(data, info);
+        if let Some(mut info) = guarded("repo", || git::repo_info(root)) {
+            if !st.name.is_empty() {
+                info.name = st.name.clone();
+            }
+            if live() {
+                publish_repo(data, info);
+            }
         }
     }
     let wts = if has_repo {
@@ -277,22 +290,52 @@ fn gather_all(root: &str, data: &Arc<Mutex<DashboardData>>, st: &mut SlowState) 
         Some(Vec::new())
     };
     let wts_for_jobs = wts.clone().unwrap_or_else(|| lock(data).worktrees.clone());
-    // Jobs list includes a synthetic "no agent" row for each worktree no job owns.
-    if let Some(j) = guarded("jobs", || {
-        jobs::merge_orphan_worktrees(jobs::gather_jobs(), &wts_for_jobs)
-    }) {
-        publish_jobs(data, j);
+    if let Some(j) = guarded("jobs", || scoped_jobs(root, &wts_for_jobs)) {
+        if live() {
+            publish_jobs(data, j);
+        }
     }
     if let Some(w) = wts {
-        publish_worktrees(data, w);
+        if live() {
+            publish_worktrees(data, w);
+        }
     }
-    if has_repo {
+    if has_repo && live() {
         gather_loc(root, data, st);
     }
     if let Some(h) = guarded("activity", crate::collect::activity::read_history) {
         publish_activity(data, h);
     }
-    gather_docker_and_endpoints(root, data);
+    if live() {
+        gather_docker_and_endpoints(root, data);
+    }
+}
+
+/// Show every project's jobs instead of only the active repo's.
+static JOBS_ALL: AtomicBool = AtomicBool::new(false);
+
+pub fn set_jobs_all(all: bool) {
+    JOBS_ALL.store(all, Ordering::Relaxed);
+}
+
+pub fn jobs_all() -> bool {
+    JOBS_ALL.load(Ordering::Relaxed)
+}
+
+/// Jobs for the Jobs widget: the active repo's (plus a synthetic "no agent"
+/// row per worktree no job owns), or every job when scoped to all projects or
+/// when no repo is open.
+fn scoped_jobs(root: &str, wts: &[Worktree]) -> Vec<Job> {
+    let all = jobs::gather_jobs();
+    if root.is_empty() {
+        return all;
+    }
+    let mine = if jobs_all() {
+        all
+    } else {
+        jobs::filter_for_repo(all, root, wts)
+    };
+    jobs::merge_orphan_worktrees_for(mine, wts, root)
 }
 
 fn gather_loc(root: &str, data: &Arc<Mutex<DashboardData>>, st: &mut SlowState) {
@@ -361,7 +404,7 @@ pub fn request_now() -> u64 {
 pub fn refresh_now(root: &str, data: &Arc<Mutex<DashboardData>>) {
     if lock(&WAKE).slow_threads == 0 {
         fetch_origin_bounded(root);
-        gather_all(root, data, &mut SlowState::default());
+        gather_all(root, data, &mut SlowState::default(), &|| true);
         return;
     }
     let ticket = request_now();
@@ -401,18 +444,41 @@ fn wait_for_tick(stop: &AtomicBool, served: u64) -> Option<u64> {
     }
 }
 
-fn slow_loop(root: &str, data: &Arc<Mutex<DashboardData>>, stop: &AtomicBool) {
+fn slow_loop(active: &ActiveProject, data: &Arc<Mutex<DashboardData>>, stop: &AtomicBool) {
     let mut st = SlowState::default();
     let mut last_fetch: Option<Instant> = None;
     let mut served = lock(&WAKE).requested;
     let mut manual = false;
+    let mut seen_gen = None;
     while !stop.load(Ordering::Relaxed) {
         let target = lock(&WAKE).requested;
-        if manual || last_fetch.is_none_or(|t| t.elapsed() >= FETCH_EVERY) {
+        let gen = active.generation();
+        if seen_gen != Some(gen) {
+            // A different project: nothing cached for the last one applies.
+            st = SlowState {
+                name: active.name(),
+                ..SlowState::default()
+            };
+            last_fetch = None;
+            seen_gen = Some(gen);
+        }
+        let root = active.root();
+        let root = root.as_str();
+        let live = || active.generation() == gen;
+        if manual || last_fetch.is_some_and(|t| t.elapsed() >= FETCH_EVERY) {
             guarded("fetch", || fetch_origin_bounded(root));
             last_fetch = Some(Instant::now());
         }
-        gather_all(root, data, &mut st);
+        gather_all(root, data, &mut st, &live);
+        if last_fetch.is_none() {
+            // A project just opened: its local state is on screen; now fetch
+            // and gather again so ahead/behind reflect the remote.
+            guarded("fetch", || fetch_origin_bounded(root));
+            last_fetch = Some(Instant::now());
+            if live() {
+                gather_all(root, data, &mut st, &live);
+            }
+        }
         {
             let mut w = lock(&WAKE);
             w.completed = w.completed.max(target);
@@ -441,16 +507,16 @@ fn spawn_named(name: &str, f: impl FnOnce() + Send + 'static) {
 
 /// Spawn the slow (10 s) refresh loop, a fast (2 s) jobs loop and the cost
 /// loop. All threads share the returned stop flag.
-pub fn spawn(root: String, data: Arc<Mutex<DashboardData>>) -> Arc<AtomicBool> {
+pub fn spawn(active: Arc<ActiveProject>, data: Arc<Mutex<DashboardData>>) -> Arc<AtomicBool> {
     install_panic_capture();
     let stop = Arc::new(AtomicBool::new(false));
 
     // Slow thread: worktrees/loc/jobs/activity/docker/endpoints/repo every
     // 10 s, `git fetch` at most every 60 s, plus manual wake-ups.
-    let (s, root2, data2) = (stop.clone(), root.clone(), data.clone());
+    let (s, active2, data2) = (stop.clone(), active.clone(), data.clone());
     lock(&WAKE).slow_threads += 1;
     spawn_named("slow", move || {
-        let _ = panic::catch_unwind(AssertUnwindSafe(|| slow_loop(&root2, &data2, &s)));
+        let _ = panic::catch_unwind(AssertUnwindSafe(|| slow_loop(&active2, &data2, &s)));
         let mut w = lock(&WAKE);
         w.slow_threads = w.slow_threads.saturating_sub(1);
         WAKE_CV.notify_all();
@@ -458,16 +524,18 @@ pub fn spawn(root: String, data: Arc<Mutex<DashboardData>>) -> Arc<AtomicBool> {
 
     // Fast thread: jobs every 2 s — the one widget that genuinely benefits
     // from a tight cadence (live agent state).
-    let (s, data3) = (stop.clone(), data.clone());
+    let (s, data3, active3) = (stop.clone(), data.clone(), active.clone());
     spawn_named("fast", move || {
         while !s.load(Ordering::Relaxed) {
             // Merge against the last-published worktrees (refreshed by the slow
             // thread) so orphan-worktree rows stay present between slow ticks.
+            let gen = active3.generation();
+            let root = active3.root();
             let wts = { lock(&data3).worktrees.clone() };
-            if let Some(j) = guarded("jobs", || {
-                jobs::merge_orphan_worktrees(jobs::gather_jobs(), &wts)
-            }) {
-                publish_jobs(&data3, j);
+            if let Some(j) = guarded("jobs", || scoped_jobs(&root, &wts)) {
+                if active3.generation() == gen {
+                    publish_jobs(&data3, j);
+                }
             }
             nap(&s, 20);
         }
@@ -475,7 +543,7 @@ pub fn spawn(root: String, data: Arc<Mutex<DashboardData>>) -> Arc<AtomicBool> {
 
     // Cost thread: usage + tool-use + skill scans every 10 s. All three walk
     // the transcripts, so they share this thread's cadence.
-    let (s, root_cost) = (stop.clone(), root);
+    let s = stop.clone();
     spawn_named("cost", move || {
         // Best-effort live price refresh at startup; ignore result.
         let _ = guarded("pricing", crate::collect::pricing::fetch_litellm);
@@ -492,10 +560,14 @@ pub fn spawn(root: String, data: Arc<Mutex<DashboardData>>) -> Arc<AtomicBool> {
             }) {
                 publish_tools(&data, t);
             }
+            let gen = active.generation();
+            let root = active.root();
             if let Some(sk) = guarded("skills", || {
-                crate::collect::skills::scan_skills(&mut skill_cache, &root_cost)
+                crate::collect::skills::scan_skills(&mut skill_cache, &root)
             }) {
-                publish_skills(&data, sk);
+                if active.generation() == gen {
+                    publish_skills(&data, sk);
+                }
             }
             nap(&s, 100);
         }

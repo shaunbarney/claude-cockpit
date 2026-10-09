@@ -32,6 +32,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_help {
         overlay::help(f, f.area(), &app.theme.clone());
     }
+    if let Some(picker) = app.picker.as_ref() {
+        crate::render::projects::render(f, f.area(), picker, &app.theme);
+    }
 }
 
 /// What a widget says when it has nothing to show.
@@ -103,7 +106,7 @@ fn too_small(f: &mut Frame, area: Rect) {
 fn draw_content(f: &mut Frame, app: &mut App) {
     let area = f.area();
     let now = chrono::Utc::now().timestamp();
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let today = crate::collect::usage::today_local();
 
     // One band for the whole frame. Deriving the guard from the full area but
     // the grid from the body (two rows shorter) left heights 18-19 passing the

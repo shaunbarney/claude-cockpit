@@ -1,8 +1,9 @@
 use std::io::IsTerminal;
 
-use claude_cockpit::{collect, config, refresh, render, runloop};
+use claude_cockpit::projects::{self, cli::ProjectCmd};
+use claude_cockpit::{config, refresh, render, runloop};
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use render::Mode;
 
 /// Shortest accepted `--interval`, in seconds. Anything faster just burns CPU
@@ -21,6 +22,13 @@ const MIN_INTERVAL: f64 = 0.5;
     version
 )]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Cmd>,
+    /// Open this project: a registered name, or any path inside a git repo.
+    /// Without it the cockpit opens the repo you are in, else the project you
+    /// had open last, else the project picker.
+    #[arg(long, short = 'p', global = true)]
+    project: Option<String>,
     /// Force the interactive cockpit (this is the default with no flags).
     #[arg(long, conflicts_with_all = ["worktrees", "code", "watch"])]
     tui: bool,
@@ -38,6 +46,13 @@ struct Cli {
     /// Refresh seconds for the one-shot `--watch` render (finite, >= 0.5).
     #[arg(long, default_value_t = 10.0, value_parser = parse_interval)]
     interval: f64,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Manage the projects the cockpit can switch between.
+    #[command(subcommand, alias = "projects")]
+    Project(ProjectCmd),
 }
 
 /// `--interval` must be a finite number of seconds, at least [`MIN_INTERVAL`].
@@ -96,11 +111,33 @@ fn run_oneshot(cli: &Cli, root: &str) {
     }
 }
 
+/// The project to open, as a repo root ("" = none: the TUI starts in the picker).
+fn startup_root(arg: Option<&str>) -> String {
+    let reg = match projects::store::load_registry() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("claude-cockpit: {e}");
+            projects::Registry::default()
+        }
+    };
+    let cwd = std::env::current_dir().unwrap_or_default();
+    match projects::resolve::startup(arg, &cwd, &reg, &projects::store::load_state()) {
+        Ok(root) => root
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        Err(e) => {
+            eprintln!("claude-cockpit: {e} — see `claude-cockpit project ls`");
+            std::process::exit(1);
+        }
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
-    // Empty outside a git repo; the TUI still starts (Docker, agents, cost and
-    // tools don't need a repo) and skips the git-backed widgets.
-    let root = collect::git::repo_root();
+    if let Some(Cmd::Project(cmd)) = cli.command {
+        std::process::exit(projects::cli::run(cmd));
+    }
+    let root = startup_root(cli.project.as_deref());
 
     let wants_oneshot = cli.worktrees || cli.code || cli.watch;
     if cli.tui || !wants_oneshot {
@@ -135,5 +172,33 @@ mod tests {
             assert!(Cli::try_parse_from(["claude-cockpit", "--tui", flag]).is_err());
         }
         assert!(Cli::try_parse_from(["claude-cockpit", "--watch", "--code"]).is_ok());
+    }
+
+    #[test]
+    fn project_subcommands_and_flag_parse() {
+        let c = Cli::try_parse_from([
+            "claude-cockpit",
+            "project",
+            "add",
+            ".",
+            "--name",
+            "x",
+            "--pin",
+        ])
+        .unwrap();
+        assert!(matches!(
+            c.command,
+            Some(Cmd::Project(ProjectCmd::Add { pin: true, .. }))
+        ));
+        let c = Cli::try_parse_from(["claude-cockpit", "projects", "ls", "--all"]).unwrap();
+        assert!(matches!(
+            c.command,
+            Some(Cmd::Project(ProjectCmd::List { all: true, .. }))
+        ));
+        let c = Cli::try_parse_from(["claude-cockpit", "-p", "sovra", "--worktrees"]).unwrap();
+        assert_eq!(c.project.as_deref(), Some("sovra"));
+        assert!(
+            Cli::try_parse_from(["claude-cockpit", "project", "tag", "x", "-old", "+new"]).is_ok()
+        );
     }
 }

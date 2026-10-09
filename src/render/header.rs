@@ -52,18 +52,22 @@ pub fn kpis(d: &DashboardData, today: &str) -> Kpis {
             .then(|| (r.prompts_5h * 100 / r.cap_prompts_5h).min(999))
     });
 
-    let containers_up = d.containers.iter().filter(|c| c.state == "running").count();
+    // Only this project's containers: the Docker widget's "show everything"
+    // fallback is a courtesy, not something to report as the project's state.
+    let mine: Vec<_> = d.containers.iter().filter(|c| c.in_repo).collect();
+    let containers_up = mine.iter().filter(|c| c.state == "running").count();
 
     Kpis {
         jobs_working,
         jobs_blocked,
-        jobs_total: d.jobs.len(),
+        // Synthetic "no agent" worktree rows are not agents.
+        jobs_total: d.jobs.iter().filter(|j| j.state != "no agent").count(),
         worktrees_dirty,
         worktrees_total: d.worktrees.len(),
         spend_today,
         rate_pct,
         containers_up,
-        containers_total: d.containers.len(),
+        containers_total: mine.len(),
     }
 }
 
@@ -267,6 +271,7 @@ mod tests {
                     id: "a".into(),
                     name: "a".into(),
                     state: "running".into(),
+                    in_repo: true,
                     status: String::new(),
                     health: None,
                     cpu_pct: 0.0,
@@ -279,6 +284,7 @@ mod tests {
                     id: "b".into(),
                     name: "b".into(),
                     state: "exited".into(),
+                    in_repo: true,
                     status: String::new(),
                     health: None,
                     cpu_pct: 0.0,
@@ -304,6 +310,21 @@ mod tests {
             }),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn other_projects_containers_and_orphan_rows_are_not_counted() {
+        let mut d = data();
+        for c in d.containers.iter_mut() {
+            c.in_repo = false;
+        }
+        d.jobs.push(Job {
+            state: "no agent".into(),
+            ..job("idle")
+        });
+        let k = kpis(&d, "2026-09-19");
+        assert_eq!((k.containers_up, k.containers_total), (0, 0));
+        assert_eq!(k.jobs_total, 3);
     }
 
     #[test]
