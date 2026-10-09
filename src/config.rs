@@ -266,6 +266,26 @@ mod tests {
             .is_empty());
     }
     #[test]
+    fn shipped_example_parses_cleanly() {
+        let (cfg, diags) = parse_with_diagnostics(include_str!("../claude-cockpit.toml.example"));
+        assert!(diags.is_empty(), "{diags:?}");
+        assert!(cfg.discover_endpoints);
+        assert_eq!(cfg.endpoints.len(), 3);
+        assert_eq!(cfg.rate_limit.plan.as_deref(), Some("max5x"));
+    }
+    #[test]
+    fn readme_example_parses_cleanly() {
+        let readme = include_str!("../README.md");
+        let block = readme
+            .split("```toml\n")
+            .nth(1)
+            .and_then(|b| b.split("```").next())
+            .expect("README has a toml example");
+        let (cfg, diags) = parse_with_diagnostics(block);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(cfg.endpoints.len(), 2);
+    }
+    #[test]
     fn candidate_paths_start_at_repo_root() {
         let v = candidate_paths("/some/repo");
         assert_eq!(v[0], Path::new("/some/repo/claude-cockpit.toml"));

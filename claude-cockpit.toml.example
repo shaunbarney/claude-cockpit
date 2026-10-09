@@ -1,10 +1,23 @@
 # claude-cockpit configuration (optional).
 #
-# Copy to `claude-cockpit.toml` in your repo root, or to
-# `~/.config/claude-cockpit/config.toml`. With no config, the Ports widget
-# auto-discovers ports from docker-compose / Dockerfile files in the repo
-# (falling back to live TCP listeners), and the Processes widget monitors a
-# built-in dev-tool set (claude, node, python, cargo, rustc, …).
+# Where it is read from: the first of these that exists is used, as a whole
+# (files are not merged):
+#   1. <repo root>/claude-cockpit.toml
+#   2. $XDG_CONFIG_HOME/claude-cockpit/config.toml  (default ~/.config/…)
+# A parse error falls back to defaults and is reported; unknown keys are
+# ignored with a warning.
+#
+# With no config, the Ports widget shows the ports published by this repo's
+# running containers, falling back to the repo's default compose files, then
+# to live TCP listeners.
+
+# Top-level keys go BEFORE the first [table] header. TOML puts any key written
+# after `[theme]` inside the theme table, where it would be ignored.
+
+# Auto-discover endpoints from this repo's running containers (and, failing
+# that, its default compose files) in addition to any [[endpoints]] below. Set
+# to false to use only the endpoints you list here. Default: true.
+discover_endpoints = true
 
 # Colour. Omit this section entirely to auto-detect, which is usually right:
 #   NO_COLOR set in the environment  -> monochrome (always wins, even over
@@ -18,13 +31,9 @@
 # mode   = "true"      # mono | ansi | true
 # accent = "#7C5CFF"   # brand colour; only applies on the truecolor tier
 
-# Auto-discover endpoints from docker-compose / Dockerfile port mappings in the
-# repo, in addition to any [[endpoints]] below. Set to false to use only the
-# endpoints you list here. Default: true.
-discover_endpoints = true
-
 # Dev endpoints to health-check in the Ports widget.
-# Each gets a TCP connect + latency check and its owning PID via lsof.
+# Each gets a TCP connect + latency check, and an owner: the Docker container
+# that publishes the port, else the listening PID (lsof, plus ss on Linux).
 [[endpoints]]
 label = "frontend"
 port  = 3000

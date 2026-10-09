@@ -6,7 +6,7 @@ very welcome.
 
 ## Development setup
 
-You need a recent Rust toolchain (via [`rustup`](https://rustup.rs)):
+You need Rust 1.88 or newer (via [`rustup`](https://rustup.rs)):
 
 ```bash
 git clone https://github.com/shaunbarney/claude-cockpit
@@ -19,16 +19,22 @@ Run it from inside a git repository with some worktrees to see real data.
 
 ## Before you open a PR
 
-CI runs three checks; please make sure they pass locally first:
+CI runs four checks on stable, plus an MSRV build. Please make sure they pass
+locally first:
 
 ```bash
-cargo fmt --all                       # format (CI checks with --check)
-cargo clippy --all-targets -- -D warnings   # lint, warnings are errors
-cargo test                            # unit + headless render tests
+cargo fmt --all                                   # format (CI checks with --check)
+cargo clippy --locked --all-targets -- -D warnings  # lint, warnings are errors
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --all-features  # docs build cleanly
+cargo test --locked                               # unit + headless render tests
 ```
 
-A green `cargo fmt --check`, a clippy run with zero warnings, and passing tests
-are required to merge.
+The MSRV job runs `cargo check --locked --all-targets` on the `rust-version`
+from `Cargo.toml` (currently 1.88, which ratatui 0.30 requires). If you raise
+it, update the toolchain in `.github/workflows/ci.yml` too.
+
+A green `cargo fmt --check`, a clippy run with zero warnings, a clean doc build,
+and passing tests are required to merge.
 
 ## Design principles
 
@@ -38,6 +44,7 @@ Keep these in mind — they're the spirit of the project:
   or touches your branches. v1 is strictly observational.
 - **Best-effort, never crashes.** Every data source is optional. A missing tool
   or file (`docker`, `lsof`, `~/.claude/…`) yields an empty widget, not a panic.
+  Shell out through `crate::proc` so every external command has a timeout.
 - **Local-first.** No daemon, no telemetry, no network for the core. The only
   network call is a best-effort price refresh that falls back to a vendored table.
 - **Fast and light.** Prefer the standard library and the existing dependency set
