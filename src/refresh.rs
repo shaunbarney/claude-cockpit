@@ -84,6 +84,7 @@ pub fn publish_activity(data: &Arc<Mutex<DashboardData>>, timestamps_ms: Vec<i64
 pub fn publish_containers(data: &Arc<Mutex<DashboardData>>, list: Vec<Container>) {
     let mut d = lock(data);
     d.containers = list;
+    d.containers_loaded = true;
     d.rev += 1;
 }
 
@@ -211,7 +212,11 @@ pub fn docker_scope() -> Scope {
 pub fn set_docker_scope(data: &Arc<Mutex<DashboardData>>, scope: Scope) {
     DOCKER_SCOPE.store(matches!(scope, Scope::All) as u8, Ordering::Relaxed);
     let all = all_containers();
-    publish_containers(data, docker::scoped(&all, scope));
+    // A re-scope of the last snapshot is not a docker tick: keep the
+    // loaded flag as it was, or a toggle before the first tick reads "empty".
+    let mut d = lock(data);
+    d.containers = docker::scoped(&all, scope);
+    d.rev += 1;
 }
 
 /// `git fetch origin --quiet`, bounded by a timeout and never prompting.

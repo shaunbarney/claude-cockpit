@@ -86,8 +86,12 @@ mod tests {
 
         let docker_before = docker_all();
         assert_eq!(toggle_docker(&data), !docker_before);
+        // Re-scoping the snapshot is not a docker tick.
+        assert!(!data.lock().unwrap().containers_loaded);
         assert_eq!(docker_all(), !docker_before);
         set_docker(&data, docker_before);
         assert_eq!(docker_all(), docker_before);
+        refresh::publish_containers(&data, Vec::new());
+        assert!(data.lock().unwrap().containers_loaded);
     }
 }

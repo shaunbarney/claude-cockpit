@@ -29,6 +29,9 @@ pub struct DashboardData {
     pub usage: Option<crate::collect::usage::UsageTotals>,
     pub activity: Vec<(String, u32)>,
     pub containers: Vec<crate::collect::docker::Container>,
+    /// False until the first docker tick for the current project has landed,
+    /// so an empty list can say "loading" rather than "no containers".
+    pub containers_loaded: bool,
     pub endpoints: Vec<crate::collect::ports::Endpoint>,
     pub tools: Vec<crate::collect::tools::ToolStat>,
     pub skills: Vec<crate::collect::skills::Skill>,

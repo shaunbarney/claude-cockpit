@@ -49,6 +49,8 @@ fn health_text(c: &Container) -> &str {
     c.health.as_deref().unwrap_or(&c.state)
 }
 
+/// Empty message before the first docker tick for this project lands.
+pub const LOADING: &str = "loading…";
 /// Shown under the caller's empty message when no filter is active.
 const EMPTY_HINT: &str = "docker not running, not installed, or no containers";
 /// Bottom-border note when the repo has no containers and all are shown.
@@ -58,7 +60,7 @@ const FALLBACK_NOTE: &str = " no containers for this repo — showing all ";
 fn render_empty(f: &mut Frame, area: Rect, title: &str, ctx: &TableCtx<'_>) {
     super::empty_state(f, area, title, ctx.empty, ctx);
     // A filter miss explains itself; only the "nothing at all" case needs help.
-    if ctx.empty.starts_with("nothing matches") || area.height < 5 {
+    if ctx.empty.starts_with("nothing matches") || ctx.empty == LOADING || area.height < 5 {
         return;
     }
     let inner = Block::default().borders(Borders::ALL).inner(area);

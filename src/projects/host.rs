@@ -157,6 +157,7 @@ pub fn switch(app: &mut App, active: &ActiveProject, root: &Path) {
         d.loc.clear();
         d.jobs.clear();
         d.containers.clear();
+        d.containers_loaded = false;
         d.endpoints.clear();
         d.skills.clear();
         d.rev += 1;
