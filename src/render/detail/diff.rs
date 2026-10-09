@@ -18,10 +18,12 @@ pub fn render(
     theme: &Theme,
     scroll: u16,
 ) {
-    // Truncate title if necessary.
+    // Truncate the title by characters: byte-slicing panics on a multi-byte
+    // char such as the `·` every diff title contains.
     let max_title = area.width.saturating_sub(4) as usize;
-    let title_str = if dv.title.len() > max_title && max_title > 3 {
-        format!(" {}… ", &dv.title[..max_title - 1])
+    let title_str = if dv.title.chars().count() > max_title && max_title > 3 {
+        let cut: String = dv.title.chars().take(max_title - 1).collect();
+        format!(" {cut}… ")
     } else {
         format!(" {} ", dv.title)
     };
@@ -91,6 +93,7 @@ mod tests {
                 "+added line".into(),
                 "-removed line".into(),
             ],
+            loading: false,
         };
         let theme = Theme::default();
         let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
@@ -98,5 +101,23 @@ mod tests {
         let s = buffer_text(term.backend().buffer());
         assert!(s.contains("added"), "buffer should contain 'added'");
         assert!(s.contains("removed"), "buffer should contain 'removed'");
+    }
+
+    #[test]
+    fn long_title_with_multibyte_chars_truncates_without_panicking() {
+        let dv = DiffView {
+            title: format!("{} · unstaged", "a/".repeat(40)),
+            lines: vec!["+x".into()],
+            loading: false,
+        };
+        let mut term = Terminal::new(TestBackend::new(30, 6)).unwrap();
+        // The cut lands right on the two-byte `·`.
+        term.draw(|f| render(f, f.area(), &dv, &Theme::default(), 0))
+            .unwrap();
+        for w in 20..40 {
+            let mut term = Terminal::new(TestBackend::new(w, 6)).unwrap();
+            term.draw(|f| render(f, f.area(), &dv, &Theme::default(), 0))
+                .unwrap();
+        }
     }
 }

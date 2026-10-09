@@ -1,12 +1,11 @@
 //! Compose the screen for the current view: header, widget grid, footer, overlays.
 
 use ratatui::layout::{Alignment, Constraint, Flex, Layout, Rect};
-use ratatui::style::Style;
-use ratatui::widgets::Paragraph;
+use ratatui::style::{Modifier, Style};
+use ratatui::widgets::{Block, Borders, Paragraph, TableState};
 use ratatui::Frame;
 
-use crate::app::{App, Detail, Mode, View};
-use crate::collect::usage::DayUsage;
+use crate::app::{App, Mode, View};
 use crate::layout::{band, cols_for, place, place_with, widgets_for, Band, FrameRects};
 use crate::render::widgets::{self, TableCtx};
 use crate::render::{footer, header, overlay};
@@ -18,6 +17,9 @@ use crate::widget::WidgetKind;
 const CHART_ROWS: usize = 10;
 
 pub fn render(f: &mut Frame, app: &mut App) {
+    app.area = f.area();
+    app.anim_visible = false;
+    app.rects = FrameRects::default();
     draw_content(f, app);
 
     if app.mode == Mode::Palette {
@@ -55,51 +57,63 @@ fn pick<T: Clone>(all: &[T], vis: &[usize]) -> Vec<T> {
 }
 
 /// Change-highlight style per displayed row, parallel to [`pick`]'s output.
+///
+/// Also notes on `app` whether any drawn row is still fading: the run loop
+/// only pays for a fast tick while motion is actually on screen.
 fn flash_for<T: TableRow>(
     all: &[T],
     vis: &[usize],
     kind: WidgetKind,
-    app: &App,
+    app: &mut App,
     theme: &Theme,
 ) -> Vec<Option<Style>> {
-    vis.iter()
+    let out: Vec<Option<Style>> = vis
+        .iter()
         .filter_map(|&i| all.get(i))
         .map(|r| {
             let key = App::flash_key(kind, &r.key());
             theme.flash_style(app.flashes.intensity(&key))
         })
-        .collect()
+        .collect();
+    app.anim_visible |= out.iter().any(Option::is_some);
+    out
 }
 
 /// Rows a widget will actually draw — what the grid weighs it by.
 fn content_rows(app: &App, kind: WidgetKind) -> usize {
     match kind {
         WidgetKind::Cost | WidgetKind::Activity => CHART_ROWS,
+        // Code draws its TOTAL in the border, so its rows are its languages.
         _ => app.visible_count(kind).max(1),
     }
 }
 
+fn too_small(f: &mut Frame, area: Rect) {
+    let p = Paragraph::new("Resize terminal (need >= 70x18)").alignment(Alignment::Center);
+    let v = Layout::vertical([
+        Constraint::Fill(1),
+        Constraint::Length(1),
+        Constraint::Fill(1),
+    ])
+    .flex(Flex::Center)
+    .split(area);
+    f.render_widget(p, v[1]);
+}
+
 fn draw_content(f: &mut Frame, app: &mut App) {
     let area = f.area();
-
     let now = chrono::Utc::now().timestamp();
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
-    if band(area) == Band::TooSmall {
-        let p = Paragraph::new("Resize terminal (need >= 70x18)").alignment(Alignment::Center);
-        let v = Layout::vertical([
-            Constraint::Fill(1),
-            Constraint::Length(1),
-            Constraint::Fill(1),
-        ])
-        .flex(Flex::Center)
-        .split(area);
-        f.render_widget(p, v[1]);
-        app.rects = FrameRects::default();
-        return;
+    // One band for the whole frame. Deriving the guard from the full area but
+    // the grid from the body (two rows shorter) left heights 18-19 passing the
+    // guard and then placing no widgets at all.
+    let b = band(area);
+    if b == Band::TooSmall {
+        return too_small(f, area);
     }
 
-    if draw_detail(f, app, area, now, &today) {
+    if crate::render::detail::screen::draw(f, app, area, now, &today) {
         return;
     }
 
@@ -110,23 +124,25 @@ fn draw_content(f: &mut Frame, app: &mut App) {
     ])
     .split(area);
     let (head, body, foot) = (outer[0], outer[1], outer[2]);
-    let b = band(body);
 
     let (kinds, cols) = match app.view {
         View::Expanded(k) => (vec![k], 1usize),
         _ => (widgets_for(b), cols_for(b)),
     };
+    // A resize can push the focused widget off the grid; keep the keyboard on
+    // something visible rather than stranded on a hidden cell.
+    if matches!(app.view, View::Dashboard) && !kinds.contains(&app.focus) {
+        if let Some(&first) = kinds.first() {
+            app.focus = first;
+        }
+    }
 
     let placed = if matches!(app.view, View::Expanded(_)) {
         place(body, &kinds, cols)
     } else {
         place_with(body, &kinds, cols, |k| content_rows(app, k))
     };
-    app.rects = FrameRects {
-        widgets: placed.clone(),
-        table_inner: None,
-        table_offset: 0,
-    };
+    app.rects.widgets = placed.clone();
 
     let theme = app.theme.clone();
     let focus = app.focus;
@@ -153,28 +169,25 @@ fn draw_content(f: &mut Frame, app: &mut App) {
     };
     header::render(f, head, &repo, &kpis, &theme, pulse, busy);
 
+    let d = WidgetData {
+        wts: &wts,
+        loc: &loc,
+        jobs: &jobs,
+        usage: usage.as_ref(),
+        containers: &containers,
+        endpoints: &endpoints,
+        tools: &tools,
+        skills: &skills,
+    };
     for (kind, rect) in &placed {
-        draw_widget(
-            f,
-            app,
-            *kind,
-            *rect,
-            &theme,
-            b,
-            focus,
+        let cx = Cx {
+            theme: &theme,
+            band: b,
+            focused: *kind == focus,
             now,
-            &today,
-            &WidgetData {
-                wts: &wts,
-                loc: &loc,
-                jobs: &jobs,
-                usage: usage.as_ref(),
-                containers: &containers,
-                endpoints: &endpoints,
-                tools: &tools,
-                skills: &skills,
-            },
-        );
+            today: &today,
+        };
+        draw_widget(f, app, *kind, *rect, &cx, &d);
     }
 
     footer::render(f, foot, app);
@@ -193,37 +206,39 @@ struct WidgetData<'a> {
     skills: &'a [crate::collect::skills::Skill],
 }
 
-/// Remember where the focused table is, for mouse row hit-testing.
-fn note_table_rect(app: &mut App, kind: WidgetKind, rect: Rect, offset: usize) {
-    if app.focus != kind {
-        return;
-    }
-    app.rects.table_inner = Some(
-        ratatui::widgets::Block::default()
-            .borders(ratatui::widgets::Borders::ALL)
-            .inner(rect),
-    );
-    // Fix-7 note: table_offset reflects the PREVIOUS frame's offset (set here,
-    // before render_stateful_widget advances it), so a click in the same frame
-    // as a scroll resolves against last frame's offset and self-corrects next
-    // draw. This is intentional — do not "fix" row_at to compensate.
-    app.rects.table_offset = offset;
+/// Per-widget presentation context.
+struct Cx<'a> {
+    theme: &'a Theme,
+    band: Band,
+    focused: bool,
+    now: i64,
+    today: &'a str,
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Draw a table with `kind`'s selection — but only while it has focus.
+///
+/// An unfocused table showing a reversed row looks exactly like a focused one,
+/// so the eye cannot tell where the keyboard is. Unfocused tables render with
+/// their scroll offset and no selection; the real state is left untouched.
+fn with_state(app: &mut App, kind: WidgetKind, focused: bool, draw: impl FnOnce(&mut TableState)) {
+    let st = &mut app.ui.entry(kind).or_default().table;
+    if focused {
+        draw(st);
+    } else {
+        let mut tmp = TableState::new().with_offset(st.offset());
+        draw(&mut tmp);
+    }
+}
+
 fn draw_widget(
     f: &mut Frame,
     app: &mut App,
     kind: WidgetKind,
     rect: Rect,
-    theme: &Theme,
-    b: Band,
-    focus: WidgetKind,
-    now: i64,
-    today: &str,
+    cx: &Cx<'_>,
     d: &WidgetData<'_>,
 ) {
-    let focused = kind == focus;
+    let (theme, focused, b) = (cx.theme, cx.focused, cx.band);
     let vis = app.visible.get(&kind).cloned().unwrap_or_default();
     let filter = app.filter_of(kind).to_string();
     let empty = empty_msg(kind, &filter);
@@ -244,53 +259,50 @@ fn draw_widget(
         WidgetKind::Worktrees => {
             let rows = pick(d.wts, &vis);
             let flash = flash_for(d.wts, &vis, kind, app, theme);
-            let st = app.ui.entry(kind).or_default();
-            widgets::worktrees::render(f, rect, &rows, ctx!(&flash), &mut st.table);
-            let off = st.table.offset();
-            note_table_rect(app, kind, rect, off);
+            with_state(app, kind, focused, |st| {
+                widgets::worktrees::render(f, rect, &rows, ctx!(&flash), st)
+            });
         }
         WidgetKind::Jobs => {
             let rows = pick(d.jobs, &vis);
             let flash = flash_for(d.jobs, &vis, kind, app, theme);
-            let st = app.ui.entry(kind).or_default();
-            widgets::jobs::render(f, rect, &rows, ctx!(&flash), &mut st.table, now);
-            let off = st.table.offset();
-            note_table_rect(app, kind, rect, off);
+            with_state(app, kind, focused, |st| {
+                widgets::jobs::render(f, rect, &rows, ctx!(&flash), st, cx.now)
+            });
         }
         WidgetKind::Docker => {
             let rows = pick(d.containers, &vis);
             let flash = flash_for(d.containers, &vis, kind, app, theme);
-            let st = app.ui.entry(kind).or_default();
-            widgets::docker::render(f, rect, &rows, ctx!(&flash), &mut st.table);
-            let off = st.table.offset();
-            note_table_rect(app, kind, rect, off);
+            with_state(app, kind, focused, |st| {
+                widgets::docker::render(f, rect, &rows, ctx!(&flash), st)
+            });
         }
         WidgetKind::Ports => {
             let rows = pick(d.endpoints, &vis);
             let flash = flash_for(d.endpoints, &vis, kind, app, theme);
-            let st = app.ui.entry(kind).or_default();
-            widgets::ports::render(f, rect, &rows, ctx!(&flash), &mut st.table);
-            let off = st.table.offset();
-            note_table_rect(app, kind, rect, off);
+            with_state(app, kind, focused, |st| {
+                widgets::ports::render(f, rect, &rows, ctx!(&flash), st)
+            });
         }
         WidgetKind::Repo => {
             let rows = pick(d.skills, &vis);
             let flash = flash_for(d.skills, &vis, kind, app, theme);
-            let st = app.ui.entry(kind).or_default();
-            widgets::skills::render(f, rect, &rows, ctx!(&flash), &mut st.table);
-            let off = st.table.offset();
-            note_table_rect(app, kind, rect, off);
+            with_state(app, kind, focused, |st| {
+                widgets::skills::render(f, rect, &rows, ctx!(&flash), st)
+            });
         }
         WidgetKind::Code => {
             let rows = pick(d.loc, &vis);
-            widgets::code::render(f, rect, &rows, theme, focused);
+            with_state(app, kind, focused, |st| {
+                widgets::code::render(f, rect, &rows, theme, focused, st)
+            });
         }
         WidgetKind::Procs => {
             let rows = pick(d.tools, &vis);
-            widgets::tools::render(f, rect, &rows, theme, focused, b);
+            draw_tools(f, app, rect, &rows, cx);
         }
         WidgetKind::Cost => {
-            widgets::cost::render(f, rect, d.usage, theme, focused, b, today);
+            widgets::cost::render(f, rect, d.usage, theme, focused, b, cx.today);
         }
         WidgetKind::Activity => {
             widgets::activity::render(f, rect, d.usage, theme, focused, b);
@@ -298,185 +310,45 @@ fn draw_widget(
     }
 }
 
-/// Render a detail screen if one is open. Returns true when it drew.
-fn draw_detail(f: &mut Frame, app: &mut App, area: Rect, now: i64, today: &str) -> bool {
-    enum Route {
-        Job(usize),
-        Worktree,
-        Diff,
-        Container(usize),
-        Cost,
-        CostModel(usize),
-        Activity,
-        Code,
-        Ports(usize),
-        Repo(usize),
-        None,
+/// The Tools widget draws a plain (stateless) table, so the selection is
+/// driven from here: keep the selected row in view by passing the renderer a
+/// window of rows starting at the scroll offset, then paint the cursor row.
+fn draw_tools(
+    f: &mut Frame,
+    app: &mut App,
+    rect: Rect,
+    rows: &[crate::collect::tools::ToolStat],
+    cx: &Cx<'_>,
+) {
+    // Borders (2) + header (1).
+    let page = rect.height.saturating_sub(3).max(1) as usize;
+    let st = &mut app.ui.entry(WidgetKind::Procs).or_default().table;
+    let sel = st.selected().filter(|&s| s < rows.len());
+    let mut off = st.offset().min(rows.len().saturating_sub(1));
+    if let Some(s) = sel {
+        if s < off {
+            off = s;
+        } else if s >= off + page {
+            off = s + 1 - page;
+        }
     }
-    let route = match &app.view {
-        View::Detail(Detail::Job(i)) => Route::Job(*i),
-        View::Detail(Detail::Worktree) => Route::Worktree,
-        View::Detail(Detail::Diff(_)) => Route::Diff,
-        View::Detail(Detail::Container(i)) => Route::Container(*i),
-        View::Detail(Detail::Cost) => Route::Cost,
-        View::Detail(Detail::CostModel(i)) => Route::CostModel(*i),
-        View::Detail(Detail::Activity) => Route::Activity,
-        View::Detail(Detail::Code) => Route::Code,
-        View::Detail(Detail::Ports(i)) => Route::Ports(*i),
-        View::Detail(Detail::Repo(i)) => Route::Repo(*i),
-        _ => Route::None,
-    };
-    if matches!(route, Route::None) {
-        return false;
-    }
+    *st.offset_mut() = off;
+    let window = rows.get(off..).unwrap_or(&[]);
+    widgets::tools::render(f, rect, window, cx.theme, cx.focused, cx.band);
 
-    let outer = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
-    let (body, foot) = (outer[0], outer[1]);
-    let theme = app.theme.clone();
-    let gone = |f: &mut Frame, what: &str| {
-        f.render_widget(
-            Paragraph::new(format!("{what} is no longer present — Esc to go back"))
-                .style(theme.dim_style()),
-            body,
-        );
-    };
-
-    match route {
-        Route::Job(idx) => {
-            let job_opt = { app.data.lock().unwrap().jobs.get(idx).cloned() };
-            match job_opt {
-                Some(job) => {
-                    let events = crate::collect::jobs::read_timeline(&job.id, 200);
-                    crate::render::detail::job::render(
-                        f,
-                        body,
-                        &job,
-                        &events,
-                        &theme,
-                        now,
-                        app.detail_scroll,
-                    );
-                }
-                None => gone(f, "that job"),
-            }
-        }
-        Route::Worktree => {
-            let jobs = { app.data.lock().unwrap().jobs.clone() };
-            if let Some(detail) = app.wt_detail.clone() {
-                crate::render::detail::worktree::render(
-                    f,
-                    body,
-                    &detail,
-                    &jobs,
-                    &theme,
-                    &mut app.detail_table,
-                    now,
-                );
-            } else {
-                f.render_widget(Paragraph::new("Loading…").style(theme.dim_style()), body);
-            }
-        }
-        Route::Diff => {
-            let scroll = app.detail_scroll;
-            if let View::Detail(Detail::Diff(dv)) = &app.view {
-                crate::render::detail::diff::render(f, body, dv, &theme, scroll);
-            }
-        }
-        Route::Container(idx) => {
-            let name = app
-                .data
-                .lock()
-                .unwrap()
-                .containers
-                .get(idx)
-                .map(|c| c.name.clone())
-                .unwrap_or_else(|| "unknown".to_string());
-            crate::render::detail::container::render(
-                f,
-                body,
-                &name,
-                &app.container_logs,
-                &theme,
-                app.detail_scroll,
-            );
-        }
-        Route::Cost => {
-            let usage = { app.data.lock().unwrap().usage.clone() };
-            match usage {
-                Some(u) => crate::render::detail::cost::render(
-                    f,
-                    body,
-                    &u,
-                    &theme,
-                    &mut app.detail_table,
-                    today,
-                ),
-                None => gone(f, "usage data"),
-            }
-        }
-        Route::CostModel(idx) => {
-            let usage = { app.data.lock().unwrap().usage.clone() };
-            match usage.as_ref().and_then(|u| u.by_model.get(idx)) {
-                Some(m) => {
-                    let empty: Vec<DayUsage> = Vec::new();
-                    let days = usage
-                        .as_ref()
-                        .and_then(|u| u.by_model_day.get(&m.model))
-                        .map(|v| v.as_slice())
-                        .unwrap_or(&empty);
-                    crate::render::detail::cost::render_model(
-                        f,
-                        body,
-                        m,
-                        days,
-                        &theme,
-                        app.detail_scroll,
-                    );
-                }
-                None => gone(f, "that model"),
-            }
-        }
-        Route::Activity => {
-            let (usage, activity) = {
-                let d = app.data.lock().unwrap();
-                (d.usage.clone(), d.activity.clone())
+    let inner = Block::default().borders(Borders::ALL).inner(rect);
+    if let (true, Some(s)) = (cx.focused, sel) {
+        let y = inner.y + 1 + (s - off) as u16;
+        if y < inner.bottom() {
+            let line = Rect {
+                y,
+                height: 1,
+                ..inner
             };
-            crate::render::detail::activity::render(
-                f,
-                body,
-                usage.as_ref(),
-                &activity,
-                &theme,
-                app.detail_scroll,
-            );
+            f.buffer_mut()
+                .set_style(line, Style::new().add_modifier(Modifier::REVERSED));
         }
-        Route::Code => {
-            let loc = { app.data.lock().unwrap().loc.clone() };
-            crate::render::detail::code::render(f, body, &loc, &theme);
-        }
-        Route::Ports(idx) => {
-            let ep = { app.data.lock().unwrap().endpoints.get(idx).cloned() };
-            match ep {
-                Some(ep) => crate::render::detail::ports::render(f, body, &ep, &theme),
-                None => gone(f, "that endpoint"),
-            }
-        }
-        Route::Repo(idx) => {
-            let skill = { app.data.lock().unwrap().skills.get(idx).cloned() };
-            crate::render::detail::skills::render(
-                f,
-                body,
-                skill.as_ref(),
-                &theme,
-                app.detail_scroll,
-            );
-        }
-        Route::None => unreachable!("handled above"),
     }
-
-    footer::render(f, foot, app);
-    app.rects = FrameRects::default();
-    true
 }
 
 #[cfg(test)]
@@ -632,6 +504,281 @@ mod tests {
             "{} vs {}",
             h(WidgetKind::Jobs),
             h(WidgetKind::Ports)
+        );
+    }
+
+    // ---- Regression tests for the interactive-layer audit ----------------
+
+    use crate::app::{Detail, DiffView};
+    use crate::event::{apply, Action};
+
+    fn three_jobs() -> App {
+        let mut app = App::new(Theme::default());
+        app.data.lock().unwrap().jobs =
+            vec![job("1", "alpha"), job("2", "beta"), job("3", "gamma")];
+        app.focus = WidgetKind::Jobs;
+        app.sync();
+        app
+    }
+
+    fn publish_jobs(app: &mut App, jobs: Vec<Job>) {
+        {
+            let mut d = app.data.lock().unwrap();
+            d.jobs = jobs;
+            d.rev += 1;
+        }
+        app.sync();
+    }
+
+    #[test]
+    fn detail_follows_the_job_not_its_index_across_a_reorder() {
+        let mut app = three_jobs();
+        apply(&mut app, Action::Drill, ".");
+        assert!(draw(&mut app, 120, 30).contains("Job · alpha"));
+
+        // A refresh reorders the jobs: the detail must still show alpha.
+        publish_jobs(
+            &mut app,
+            vec![job("3", "gamma"), job("2", "beta"), job("1", "alpha")],
+        );
+        let s = draw(&mut app, 120, 30);
+        assert!(s.contains("Job · alpha"), "detail swapped to another job");
+        assert!(!s.contains("Job · gamma"));
+
+        // And once alpha is gone, say so instead of showing a neighbour.
+        publish_jobs(&mut app, vec![job("2", "beta")]);
+        let s = draw(&mut app, 120, 30);
+        assert!(s.contains("no longer present"), "{s}");
+        assert!(!s.contains("Job · beta"));
+    }
+
+    #[test]
+    fn selection_follows_its_row_when_rows_above_disappear() {
+        let mut app = three_jobs();
+        apply(&mut app, Action::Down, ".");
+        assert_eq!(app.selected_key(WidgetKind::Jobs).as_deref(), Some("2"));
+        publish_jobs(&mut app, vec![job("2", "beta"), job("3", "gamma")]);
+        assert_eq!(app.selected_key(WidgetKind::Jobs).as_deref(), Some("2"));
+        publish_jobs(
+            &mut app,
+            vec![job("3", "gamma"), job("1", "alpha"), job("2", "beta")],
+        );
+        assert_eq!(app.selected_key(WidgetKind::Jobs).as_deref(), Some("2"));
+        // A vanished row falls back to clamping the old position.
+        publish_jobs(&mut app, vec![job("3", "gamma")]);
+        assert_eq!(app.selected_key(WidgetKind::Jobs).as_deref(), Some("3"));
+    }
+
+    #[test]
+    fn heights_just_above_the_guard_still_draw_the_grid() {
+        for h in [18, 19] {
+            let mut app = App::new(Theme::default());
+            let s = draw(&mut app, 100, h);
+            assert!(!s.to_lowercase().contains("resize"), "h={h} hit the guard");
+            assert!(!app.rects.widgets.is_empty(), "h={h} placed no widgets");
+            assert!(s.contains("Worktrees"), "h={h}");
+        }
+        let mut app = App::new(Theme::default());
+        assert!(draw(&mut app, 100, 17).to_lowercase().contains("resize"));
+    }
+
+    #[test]
+    fn tab_skips_widgets_the_band_hides_and_palette_expands_them() {
+        let mut app = App::new(Theme::default());
+        app.focus = WidgetKind::Docker; // last widget placed in the Medium band
+        let s = draw(&mut app, 140, 40);
+        assert!(s.contains("+3 hidden"), "footer must admit hidden widgets");
+        apply(&mut app, Action::FocusNext, ".");
+        assert_eq!(
+            app.focus,
+            WidgetKind::Worktrees,
+            "Tab landed on a hidden widget"
+        );
+        apply(&mut app, Action::FocusPrev, ".");
+        assert_eq!(app.focus, WidgetKind::Docker);
+
+        // The palette can still reach a hidden widget — by expanding it.
+        apply(&mut app, Action::BeginPalette, ".");
+        for c in "go to ports".chars() {
+            apply(&mut app, Action::Input(c), ".");
+        }
+        apply(&mut app, Action::Accept, ".");
+        assert_eq!(app.focus, WidgetKind::Ports);
+        assert!(matches!(app.view, View::Expanded(WidgetKind::Ports)));
+        assert!(draw(&mut app, 140, 40).contains("Ports"));
+    }
+
+    #[test]
+    fn tab_in_expanded_moves_the_view_with_the_focus() {
+        let mut app = three_jobs();
+        app.focus = WidgetKind::Worktrees;
+        apply(&mut app, Action::Expand, ".");
+        apply(&mut app, Action::FocusNext, ".");
+        assert_eq!(app.focus, WidgetKind::Jobs);
+        assert!(matches!(app.view, View::Expanded(WidgetKind::Jobs)));
+        assert!(draw(&mut app, 120, 30).contains("alpha"));
+
+        // Back from a detail opened in Expanded returns to Expanded.
+        apply(&mut app, Action::Drill, ".");
+        assert!(matches!(app.view, View::Detail(Detail::Job(_))));
+        apply(&mut app, Action::Back, ".");
+        assert!(matches!(app.view, View::Expanded(WidgetKind::Jobs)));
+    }
+
+    #[test]
+    fn detail_keys_do_not_touch_the_hidden_dashboard() {
+        let mut app = three_jobs();
+        apply(&mut app, Action::Drill, ".");
+        let _ = draw(&mut app, 120, 30);
+
+        apply(&mut app, Action::BeginFilter, ".");
+        assert_eq!(
+            app.mode,
+            Mode::Normal,
+            "/ opened a filter on an unseen table"
+        );
+        apply(&mut app, Action::SortCycle, ".");
+        apply(&mut app, Action::SortReverse, ".");
+        assert_eq!(app.ui[&WidgetKind::Jobs].sort_col, 0);
+        apply(&mut app, Action::Bottom, ".");
+        assert_eq!(app.ui[&WidgetKind::Jobs].table.selected(), Some(0));
+
+        // The palette offers no filter/sort here, and its commands are inert.
+        let (entries, _) = crate::event::palette_state(&mut app);
+        assert!(!entries.iter().any(|e| e.label == "Filter rows"));
+        apply(&mut app, Action::BeginPalette, ".");
+        for c in "filter".chars() {
+            apply(&mut app, Action::Input(c), ".");
+        }
+        apply(&mut app, Action::Accept, ".");
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(matches!(app.view, View::Detail(Detail::Job(_))));
+    }
+
+    #[test]
+    fn detail_scroll_is_bounded_so_paging_back_works_at_once() {
+        let mut app = App::new(Theme::default());
+        let lines: Vec<String> = (0..100).map(|i| format!("line {i}")).collect();
+        app.view = View::Detail(Detail::Diff(DiffView {
+            title: "t".into(),
+            lines,
+            loading: false,
+        }));
+        let _ = draw(&mut app, 100, 30);
+        let max = app.detail_max;
+        assert!(max > 0);
+        for _ in 0..50 {
+            apply(&mut app, Action::PageDown, ".");
+        }
+        assert_eq!(app.detail_scroll, max, "overscroll piled up");
+        apply(&mut app, Action::PageUp, ".");
+        assert_eq!(
+            app.detail_scroll,
+            max - 10,
+            "PgUp after overscroll was dead"
+        );
+        apply(&mut app, Action::Bottom, ".");
+        assert_eq!(app.detail_scroll, max);
+        apply(&mut app, Action::Top, ".");
+        assert_eq!(app.detail_scroll, 0);
+
+        // Content that fits never scrolls at all.
+        app.view = View::Detail(Detail::Diff(DiffView {
+            title: "t".into(),
+            lines: vec!["x".into(); 5],
+            loading: false,
+        }));
+        let _ = draw(&mut app, 100, 30);
+        apply(&mut app, Action::PageDown, ".");
+        assert_eq!(app.detail_scroll, 0);
+    }
+
+    #[test]
+    fn palette_hides_filter_and_sort_on_chart_widgets() {
+        let mut app = App::new(Theme::default());
+        app.focus = WidgetKind::Cost;
+        app.mode = Mode::Palette;
+        let s = draw(&mut app, 200, 50);
+        assert!(!s.contains("Filter rows"), "Cost has no rows to filter");
+        assert!(!s.contains("Sort Cost"));
+
+        app.focus = WidgetKind::Jobs;
+        let s = draw(&mut app, 200, 60);
+        assert!(s.contains("Filter rows"));
+    }
+
+    #[test]
+    fn escape_in_expanded_clears_the_filter_first() {
+        let mut app = three_jobs();
+        apply(&mut app, Action::Expand, ".");
+        app.ui_mut(WidgetKind::Jobs).filter = "alpha".into();
+        app.refilter();
+        apply(&mut app, Action::Back, ".");
+        assert!(matches!(app.view, View::Expanded(WidgetKind::Jobs)));
+        assert_eq!(app.filter_of(WidgetKind::Jobs), "");
+        apply(&mut app, Action::Back, ".");
+        assert!(matches!(app.view, View::Dashboard));
+    }
+
+    #[test]
+    fn help_overlay_is_modal() {
+        let mut app = three_jobs();
+        apply(&mut app, Action::Help, ".");
+        apply(&mut app, Action::Down, ".");
+        apply(&mut app, Action::Drill, ".");
+        assert_eq!(app.ui[&WidgetKind::Jobs].table.selected(), Some(0));
+        assert!(matches!(app.view, View::Dashboard));
+        apply(&mut app, Action::Back, ".");
+        assert!(!app.show_help);
+    }
+
+    #[test]
+    fn unfocused_tables_show_no_selection_highlight() {
+        let mut app = three_jobs();
+        app.focus = WidgetKind::Worktrees;
+        let mut term = Terminal::new(TestBackend::new(200, 60)).unwrap();
+        term.draw(|f| render(f, &mut app)).unwrap();
+        let buf = term.backend().buffer();
+        let reversed = buf
+            .content
+            .iter()
+            .any(|c| c.modifier.contains(ratatui::style::Modifier::REVERSED));
+        assert!(!reversed, "an unfocused table drew a reversed cursor row");
+        // Its real selection is untouched.
+        assert_eq!(app.ui[&WidgetKind::Jobs].table.selected(), Some(0));
+    }
+
+    #[test]
+    fn tools_cursor_is_visible_and_reaches_the_last_row() {
+        let mut app = App::new(Theme::default());
+        app.data.lock().unwrap().tools = (0..40)
+            .map(|i| crate::collect::tools::ToolStat {
+                name: format!("Tool{i:02}"),
+                count: 100 - i,
+            })
+            .collect();
+        app.focus = WidgetKind::Procs;
+        app.sync();
+        apply(&mut app, Action::Expand, ".");
+        apply(&mut app, Action::Bottom, ".");
+        let mut term = Terminal::new(TestBackend::new(120, 30)).unwrap();
+        term.draw(|f| render(f, &mut app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let text = buffer_text(&buf);
+        assert!(text.contains("Tool39"), "last tool must scroll into view");
+        let row_of_last = (0..30u16)
+            .find(|&y| {
+                (0..120u16)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+                    .contains("Tool39")
+            })
+            .unwrap();
+        assert!(
+            buf[(5, row_of_last)]
+                .modifier
+                .contains(ratatui::style::Modifier::REVERSED),
+            "selected tool row must be highlighted"
         );
     }
 }

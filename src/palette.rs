@@ -54,8 +54,10 @@ impl Entry {
 ///
 /// The sort entries are built from the focused widget's own columns, so the
 /// palette offers "Sort by cpu" on Docker and "Sort by uses" on Skills rather
-/// than a generic list that is wrong most of the time.
-pub fn registry(focus: WidgetKind) -> Vec<Entry> {
+/// than a generic list that is wrong most of the time. `table_ops` says whether
+/// filter and sort can apply at all — false on a chart widget or a detail
+/// screen, where offering them would promise something that cannot happen.
+pub fn registry(focus: WidgetKind, table_ops: bool) -> Vec<Entry> {
     let mut out: Vec<Entry> = WidgetKind::all()
         .iter()
         .map(|&k| Entry::new(format!("Go to {}", k.title()), "", Command::Focus(k)))
@@ -63,16 +65,17 @@ pub fn registry(focus: WidgetKind) -> Vec<Entry> {
 
     out.push(Entry::new("Expand focused widget", "e", Command::Expand));
     out.push(Entry::new("Open selected row", "Enter", Command::Drill));
-    out.push(Entry::new("Filter rows", "/", Command::Filter));
-    out.push(Entry::new("Clear filter", "Esc", Command::ClearFilter));
-
-    for (i, col) in crate::view::sort_columns(focus).iter().enumerate() {
-        let label = if i == 0 {
-            format!("Sort {} by default order", focus.title())
-        } else {
-            format!("Sort {} by {}", focus.title(), col)
-        };
-        out.push(Entry::new(label, "s", Command::Sort(i)));
+    if table_ops {
+        out.push(Entry::new("Filter rows", "/", Command::Filter));
+        out.push(Entry::new("Clear filter", "Esc", Command::ClearFilter));
+        for (i, col) in crate::view::sort_columns(focus).iter().enumerate() {
+            let label = if i == 0 {
+                format!("Sort {} by default order", focus.title())
+            } else {
+                format!("Sort {} by {}", focus.title(), col)
+            };
+            out.push(Entry::new(label, "s", Command::Sort(i)));
+        }
     }
 
     out.push(Entry::new("Refresh now", "r", Command::Refresh));
@@ -100,7 +103,7 @@ mod tests {
 
     #[test]
     fn registry_covers_every_widget() {
-        let r = registry(WidgetKind::Jobs);
+        let r = registry(WidgetKind::Jobs, true);
         for &k in WidgetKind::all() {
             assert!(
                 r.iter().any(|e| e.cmd == Command::Focus(k)),
@@ -112,16 +115,30 @@ mod tests {
 
     #[test]
     fn sort_entries_follow_the_focused_widget() {
-        let docker = registry(WidgetKind::Docker);
+        let docker = registry(WidgetKind::Docker, true);
         assert!(docker.iter().any(|e| e.label.contains("by cpu")));
-        let skills = registry(WidgetKind::Repo);
+        let skills = registry(WidgetKind::Repo, true);
         assert!(skills.iter().any(|e| e.label.contains("by uses")));
         assert!(!skills.iter().any(|e| e.label.contains("by cpu")));
     }
 
     #[test]
+    fn table_commands_only_offered_where_they_apply() {
+        let cost = registry(WidgetKind::Cost, false);
+        assert!(!cost.iter().any(|e| e.cmd == Command::Filter));
+        assert!(!cost.iter().any(|e| matches!(e.cmd, Command::Sort(_))));
+        assert!(!cost.iter().any(|e| e.cmd == Command::ClearFilter));
+        // Navigation stays available everywhere.
+        assert!(cost
+            .iter()
+            .any(|e| e.cmd == Command::Focus(WidgetKind::Jobs)));
+        let jobs = registry(WidgetKind::Jobs, true);
+        assert!(jobs.iter().any(|e| e.cmd == Command::Filter));
+    }
+
+    #[test]
     fn search_ranks_and_narrows() {
-        let r = registry(WidgetKind::Jobs);
+        let r = registry(WidgetKind::Jobs, true);
         let mut fz = Fuzzy::default();
 
         // Empty needle keeps everything, in order.
@@ -136,7 +153,7 @@ mod tests {
 
     #[test]
     fn abbreviations_find_commands() {
-        let r = registry(WidgetKind::Jobs);
+        let r = registry(WidgetKind::Jobs, true);
         let mut fz = Fuzzy::default();
         let hits = search(&r, "refr", &mut fz);
         assert_eq!(r[hits[0]].cmd, Command::Refresh);

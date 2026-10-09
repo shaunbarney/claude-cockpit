@@ -43,19 +43,17 @@ Flow: `collect::*` (IO-bound domain snapshot) → `refresh::publish_<x>` swaps *
 The one exception to "no change, no redraw": while something is animating — a refresh spinner, or a row still fading after it changed — the loop ticks at `anim::FRAME` (80 ms). `Flashes::animating()` gates it, so an idle cockpit still costs nothing. Hold the lock as briefly as possible; never render while holding it. The manual `r` refresh (which calls `refresh_now`, i.e. `git fetch` + `gather_all`) is debounced with the `REFRESH_INFLIGHT` atomic.
 
 ### UI state machine (`app.rs`)
-`View` = `Dashboard | Expanded(WidgetKind) | Detail(Detail)`, where `Detail` = `Worktree | Job(idx) | Container(idx) | Diff | …`. `App::back()` pops `Diff → Worktree → Dashboard`. Worktree detail is special: it keys off `last_wt_idx`/`wt_detail` rather than carrying an index, because drilling into a file diff needs the cached `WorktreeDetail`.
+`View` = `Dashboard | Expanded(WidgetKind) | Detail(Detail)`. Row-backed details (`Job`, `Container`, `Ports`, `Repo`, `CostModel`) carry the row's **stable key** (`rows::TableRow::key` — job id, container id, `host:port`, `source/name`, model name), never a data index: refreshes reorder rows, so `render/detail/screen.rs` resolves the key against live data every frame and shows "no longer present" when it is gone. The worktree detail keys off `App::wt_path` + the cached `wt_detail` (the file diff needs it). `App::back()` pops `Diff → Worktree`, `CostModel → Cost`, and any other detail back to where it was opened from (`App::origin`: an Expanded widget, else the Dashboard).
 
-`Mode` = `Normal | Filter | Palette` decides whether a letter navigates or types. Without it, `/`-searching for a job called "quiet" would quit the app on the `q`.
+Table selection also follows identity: `App::refilter` keeps the visible rows' keys alongside their indices and reselects the previously selected key after any refilter/refresh, clamping only when that row is gone. Filter/sort apply only in `Dashboard`/`Expanded` and only to `view::is_table` widgets (the palette hides those entries elsewhere).
 
-**`App::visible` is the one thing to get right when touching tables.** It maps each `WidgetKind` to the *data* indices currently on screen, after filter and sort. Every row count, selection bound, and drill-in goes through `visible_count` / `data_index` / `selected_data_index` — never through `data.jobs.len()` or a raw selection index, or a filtered table will open the wrong row. Recompute with `App::refilter()` after any change to a filter or sort.
-
-### Rows, filtering, sorting (`rows.rs` + `view.rs`)
-`TableRow` gives a row type a stable `key()` (identity across refreshes), a `sig()` (changes when anything visible changes, driving the flash), `search()` text, and sortable columns. `view.rs` maps a `WidgetKind` onto its backing slice via one `on_rows!` macro, so add a `WidgetKind` variant and the compiler points at the arm to fill in.
-
-Signatures must **quantise noisy fields** — `Container::sig` rounds CPU and buckets memory, because raw samples jitter every tick and would leave every row permanently flashing.
+Drill-ins that shell out (`git_detail::worktree_detail`, `file_diff`, `docker logs`) run on a worker thread via `App::spawn_load`; results come back over a channel drained by the run loop (`App::drain_loads`), tagged with a token so superseded requests are dropped. Detail screens render "loading…" meanwhile. Scrolling details report their maximum scroll into `App::detail_max` while rendering; input clamps against it.
 
 ### Input (`event.rs`)
-Pure `map_key(code, mods, mode) -> Action`, then `apply(app, action, root)` mutates `App`. The palette (`palette.rs`) is a registry of `Command`s built per focused widget — its sort entries come from that widget's own columns — so it doubles as the feature list and cannot drift from what the app can do. Mouse routing uses `FrameRects` (the per-frame hit map written by `dashboard.rs` each draw) to find the clicked widget/row. Note the intentional one-frame lag in `table_offset` (see the "Fix-7" comment in `dashboard.rs`) — clicks resolve against the previous frame's scroll offset and self-correct; do not "fix" it.
+Pure `map_key(code, mods) -> Action`, then `apply(app, action, root)` mutates `App`. Mouse routing uses `FrameRects` (the per-frame hit map written each draw: widget rects, plus the worktree detail's file table) to find the clicked widget/row; clicking an already-selected row drills in, and the wheel scrolls the widget under the pointer. The help overlay and palette are modal. On the dashboard, Tab skips widgets the current size band does not place (`App::placed`); in Expanded, Tab cycles every widget and the view follows; palette "Go to" a hidden widget opens it Expanded.
+
+### Panics
+`runloop.rs` replaces ratatui's panic hook: the terminal (incl. mouse capture) is restored only when the **UI thread** panics. A collector-thread panic must not tear the terminal down under a UI that keeps drawing.
 
 ### Widget identity (`widget.rs`) and placement (`layout.rs`)
 `WidgetKind` is the focus/identity backbone. The order of `WidgetKind::all()` defines the Tab cycle, which widgets appear per size band, **and the grid position** — reordering it moves panels, which resets everyone's spatial memory of the dashboard. Don't, without a reason.

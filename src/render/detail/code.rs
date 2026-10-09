@@ -10,6 +10,29 @@ use crate::collect::loc::{totals, LocRow};
 use crate::theme::Theme;
 use crate::util::thousands;
 
+/// Whole percentages that sum to exactly 100 (largest-remainder method).
+///
+/// Plain truncation dropped every row's fraction, so a long tail of small
+/// languages left the column summing to well under the TOTAL row's 100%.
+pub fn percentages(values: &[u64]) -> Vec<u64> {
+    let total: u64 = values.iter().sum();
+    if total == 0 {
+        return vec![0; values.len()];
+    }
+    let mut out: Vec<u64> = values.iter().map(|v| v * 100 / total).collect();
+    let mut left = 100 - out.iter().sum::<u64>();
+    let mut order: Vec<usize> = (0..values.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(values[i] * 100 % total));
+    for &i in order.iter().cycle().take(values.len().max(1) * 2) {
+        if left == 0 {
+            break;
+        }
+        out[i] += 1;
+        left -= 1;
+    }
+    out
+}
+
 pub fn render(f: &mut Frame, area: Rect, loc: &[LocRow], theme: &Theme) {
     let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
 
@@ -40,11 +63,11 @@ pub fn render(f: &mut Frame, area: Rect, loc: &[LocRow], theme: &Theme) {
         return;
     }
 
-    let total_lines = sums.lines.max(1);
+    let pcts = percentages(&loc.iter().map(|r| r.lines as u64).collect::<Vec<_>>());
     let mut rows: Vec<Row> = loc
         .iter()
-        .map(|r| {
-            let pct = r.lines * 100 / total_lines;
+        .zip(&pcts)
+        .map(|(r, pct)| {
             Row::new(vec![
                 Cell::from(Span::styled(
                     r.language.clone(),
@@ -89,6 +112,15 @@ mod tests {
 
     fn text(buf: &ratatui::buffer::Buffer) -> String {
         buf.content.iter().map(|c| c.symbol()).collect()
+    }
+
+    #[test]
+    fn percentages_sum_to_one_hundred() {
+        let p = percentages(&[1, 1, 1]);
+        assert_eq!(p.iter().sum::<u64>(), 100);
+        assert_eq!(percentages(&[900, 50, 30, 20]).iter().sum::<u64>(), 100);
+        assert_eq!(percentages(&[0, 0]), vec![0, 0]);
+        assert_eq!(percentages(&[5]), vec![100]);
     }
 
     #[test]

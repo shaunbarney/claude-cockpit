@@ -3,12 +3,12 @@
 
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Span;
-use ratatui::widgets::{Block, Borders, Cell, Row, Table};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
 use ratatui::Frame;
 
 use crate::collect::loc::LocRow;
-use crate::theme::Theme;
+use crate::theme::{Depth, Theme};
 use crate::util::thousands;
 
 /// A Nerd Font glyph for a language name (falls back to a generic file icon).
@@ -67,6 +67,17 @@ fn lang_color(lang: &str) -> Color {
     }
 }
 
+/// The colour a language is drawn in at this theme's depth. Brand colours are
+/// 24-bit, so they only apply on a truecolor terminal; the ANSI tier uses the
+/// accent and monochrome gets no colour at all.
+fn lang_fg(theme: &Theme, lang: &str) -> Style {
+    match theme.depth {
+        Depth::True => Style::new().fg(lang_color(lang)),
+        Depth::Ansi16 => Style::new().fg(theme.accent),
+        Depth::Mono => Style::new(),
+    }
+}
+
 /// A left-aligned bar of `frac` (0..1) over `width` cells, using eighth-blocks
 /// for sub-cell precision — gives the column a clean little histogram.
 fn bar(frac: f64, width: usize) -> String {
@@ -82,17 +93,36 @@ fn bar(frac: f64, width: usize) -> String {
 }
 
 /// Render the Code (LOC) table into `area`.
-pub fn render(f: &mut Frame, area: Rect, rows: &[LocRow], theme: &Theme, focused: bool) {
-    let border_style = if focused {
-        Style::new().fg(theme.focus_border)
-    } else {
-        theme.dim_style()
-    };
-
+///
+/// Stateful like every other table, so the cursor shows and scrolls. The
+/// TOTAL sits in the bottom border rather than as a last row: as a row it
+/// scrolled out of view the moment the table overflowed its cell.
+pub fn render(
+    f: &mut Frame,
+    area: Rect,
+    rows: &[LocRow],
+    theme: &Theme,
+    focused: bool,
+    state: &mut TableState,
+) {
+    let tot = crate::collect::loc::totals(rows);
+    let total = Line::from(vec![
+        Span::styled(" TOTAL ", theme.title()),
+        Span::styled(
+            format!("{} files · ", thousands(tot.files as u64)),
+            theme.dim_style(),
+        ),
+        Span::styled(
+            format!("{} lines ", thousands(tot.lines as u64)),
+            theme.title(),
+        ),
+    ])
+    .right_aligned();
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Code ")
-        .border_style(border_style);
+        .title_bottom(total)
+        .border_style(theme.border_style(focused));
 
     let widths: &[Constraint] = &[
         Constraint::Min(14),    // icon + language
@@ -106,53 +136,30 @@ pub fn render(f: &mut Frame, area: Rect, rows: &[LocRow], theme: &Theme, focused
 
     let max_lines = rows.iter().map(|r| r.lines).max().unwrap_or(0).max(1) as f64;
 
-    let mut body: Vec<Row> = rows
+    let body: Vec<Row> = rows
         .iter()
         .map(|r| {
-            let color = lang_color(&r.language);
+            let fg = lang_fg(theme, &r.language);
             let frac = r.lines as f64 / max_lines;
             Row::new(vec![
                 Cell::from(Span::styled(
                     format!("{} {}", lang_icon(&r.language), r.language),
-                    Style::new().fg(color).add_modifier(Modifier::BOLD),
+                    fg.add_modifier(Modifier::BOLD),
                 )),
-                Cell::from(Span::styled(
-                    thousands(r.files as u64),
-                    Style::new().fg(Color::DarkGray),
-                )),
-                Cell::from(Span::styled(
-                    thousands(r.lines as u64),
-                    Style::new().fg(color),
-                )),
-                Cell::from(Span::styled(bar(frac, 8), Style::new().fg(color))),
+                Cell::from(Span::styled(thousands(r.files as u64), theme.dim_style())),
+                Cell::from(Span::styled(thousands(r.lines as u64), fg)),
+                Cell::from(Span::styled(bar(frac, 8), fg)),
             ])
         })
         .collect();
 
-    // TOTAL row in accent colour.
-    let tot = crate::collect::loc::totals(rows);
-    body.push(Row::new(vec![
-        Cell::from(Span::styled(
-            "\u{f085} TOTAL", //
-            Style::new().fg(theme.accent).add_modifier(Modifier::BOLD),
-        )),
-        Cell::from(Span::styled(
-            thousands(tot.files as u64),
-            Style::new().add_modifier(Modifier::BOLD),
-        )),
-        Cell::from(Span::styled(
-            thousands(tot.lines as u64),
-            Style::new().fg(theme.accent).add_modifier(Modifier::BOLD),
-        )),
-        Cell::from(""),
-    ]));
-
     let table = Table::new(body, widths)
         .header(header)
         .column_spacing(2)
-        .block(block);
+        .block(block)
+        .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED));
 
-    f.render_widget(table, area);
+    f.render_stateful_widget(table, area, state);
 }
 
 #[cfg(test)]
@@ -174,5 +181,38 @@ mod tests {
         assert_eq!(lang_color("ts"), lang_color("typescript"));
         // Unknown languages fall back to the neutral grey, not a panic.
         assert_eq!(lang_color("brainfuck"), Color::Rgb(0x9E, 0xA3, 0xAE));
+    }
+
+    #[test]
+    fn mono_theme_draws_languages_without_colour() {
+        let mono = Theme::new(Depth::Mono, None);
+        assert_eq!(lang_fg(&mono, "rust").fg, None);
+    }
+
+    #[test]
+    fn total_stays_visible_when_rows_overflow() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let rows: Vec<LocRow> = (0..30)
+            .map(|i| LocRow {
+                language: format!("L{i}"),
+                files: 1,
+                lines: 10,
+                code: 10,
+            })
+            .collect();
+        let mut term = Terminal::new(TestBackend::new(60, 8)).unwrap();
+        let mut st = TableState::default();
+        st.select(Some(29));
+        term.draw(|f| render(f, f.area(), &rows, &Theme::default(), true, &mut st))
+            .unwrap();
+        let s: String = term
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(s.contains("TOTAL"), "{s}");
+        assert!(s.contains("L29"), "selected last row must scroll into view");
     }
 }

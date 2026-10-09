@@ -16,23 +16,24 @@ use crate::theme::Theme;
 
 /// Key help, grouped by layer. `None` marks a group break.
 const HELP: &[Option<(&str, &str)>] = &[
-    Some(("↑ ↓ ← →", "move between widgets")),
-    Some(("Tab / ⇧Tab", "cycle focus")),
-    Some(("j / k", "select row")),
-    Some(("g / G", "first / last row")),
-    Some(("PgUp / PgDn", "page through rows")),
+    Some(("Tab / ⇧Tab", "cycle widgets")),
+    Some(("↑↓←→ / h l", "move between widgets (dashboard)")),
+    Some(("j / k", "select row · scroll a detail")),
+    Some(("g G / Home End", "first / last")),
+    Some(("PgUp PgDn / ^U ^D", "page")),
     None,
-    Some(("Enter", "open the selected row")),
+    Some(("Enter / click", "open the selection (click it again)")),
     Some(("e", "expand the focused widget")),
     Some(("Esc", "back, or clear the filter")),
     Some(("r", "refresh now")),
     None,
     Some(("/", "filter rows as you type")),
-    Some((":  or  ^K", "command palette")),
+    Some((": / ^K / ^P", "command palette")),
     Some(("s / S", "cycle sort column / reverse")),
     None,
+    Some(("wheel", "scroll the widget under the pointer")),
     Some(("?", "toggle this help")),
-    Some(("q", "quit")),
+    Some(("q / ^C", "quit")),
 ];
 
 /// Centre a `w` x `h` rect inside `area`, clamped to fit.
@@ -71,7 +72,13 @@ pub fn help(f: &mut Frame, area: Rect, theme: &Theme) {
         })
         .collect();
 
-    let width = (key_w + 6 + 34) as u16;
+    let desc_w = HELP
+        .iter()
+        .flatten()
+        .map(|(_, d)| d.chars().count())
+        .max()
+        .unwrap_or(30);
+    let width = (key_w + desc_w + 8) as u16;
     let popup = centered(area, width, lines.len() as u16 + 2);
 
     let block = Block::default()
@@ -217,7 +224,7 @@ mod tests {
     #[test]
     fn palette_shows_matches_and_marks_the_selection() {
         let theme = Theme::new(Depth::True, None);
-        let entries = registry(WidgetKind::Jobs);
+        let entries = registry(WidgetKind::Jobs, true);
         let mut fz = Fuzzy::default();
         let hits = crate::palette::search(&entries, "dock", &mut fz);
         let s = screen(90, 24, |f, a| {
@@ -231,7 +238,7 @@ mod tests {
     #[test]
     fn palette_says_so_when_nothing_matches() {
         let theme = Theme::new(Depth::True, None);
-        let entries = registry(WidgetKind::Jobs);
+        let entries = registry(WidgetKind::Jobs, true);
         let s = screen(90, 24, |f, a| {
             palette(f, a, "zzzz", &entries, &[], 0, &theme)
         });

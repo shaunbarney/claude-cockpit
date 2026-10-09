@@ -23,6 +23,7 @@ pub fn hints(app: &App) -> Vec<(&'static str, &'static str)> {
             vec![
                 ("↑↓", "select"),
                 ("Enter", "diff"),
+                ("g/G", "first/last"),
                 ("Esc", "back"),
                 ("q", "quit"),
             ]
@@ -31,14 +32,21 @@ pub fn hints(app: &App) -> Vec<(&'static str, &'static str)> {
             vec![
                 ("↑↓", "select"),
                 ("Enter", "model"),
+                ("g/G", "first/last"),
                 ("Esc", "back"),
                 ("q", "quit"),
             ]
         }
-        (_, View::Detail(_)) => vec![("↑↓", "scroll"), ("Esc", "back"), ("q", "quit")],
+        (_, View::Detail(_)) => vec![
+            ("↑↓ PgUp/PgDn", "scroll"),
+            ("g/G", "top/end"),
+            ("Esc", "back"),
+            ("q", "quit"),
+        ],
         (_, View::Expanded(_)) => vec![
             ("↑↓", "rows"),
             ("Enter", "open"),
+            ("Tab", "next widget"),
             ("/", "filter"),
             ("s", "sort"),
             ("Esc", "back"),
@@ -58,11 +66,24 @@ pub fn hints(app: &App) -> Vec<(&'static str, &'static str)> {
     }
 }
 
+/// Says how many widgets the size band left off the dashboard — otherwise
+/// they are simply missing, with no hint that Tab-in-Expanded reaches them.
+fn hidden_badge(app: &App) -> Option<Span<'static>> {
+    let n = app.hidden_count();
+    (matches!(app.view, View::Dashboard) && n > 0)
+        .then(|| Span::styled(format!(" +{n} hidden · e expand "), app.theme.muted_style()))
+}
+
 /// The filter/sort badge for the focused widget, e.g. `filter:sovra 3/15` or
 /// `sort:cpu ↓`. Empty when the widget is showing everything, unsorted.
+/// Detail screens show none: the filter belongs to a table not on screen.
 pub fn status_badge(app: &App) -> Vec<Span<'static>> {
     let theme = &app.theme;
     let mut out = Vec::new();
+    if !app.table_view() {
+        return out;
+    }
+    out.extend(hidden_badge(app));
     let k = app.focus;
     let Some(st) = app.ui.get(&k) else {
         return out;
@@ -224,6 +245,19 @@ mod tests {
             .collect();
         assert!(joined.contains("filter:abc"), "{joined}");
         assert!(joined.contains("sort:state↓"), "{joined}");
+    }
+
+    #[test]
+    fn dashboard_says_how_many_widgets_are_hidden() {
+        let mut app = App::new(Theme::default());
+        app.area = Rect::new(0, 0, 140, 40); // Medium band: 6 of 9 placed
+        let joined: String = status_badge(&app)
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect();
+        assert!(joined.contains("+3 hidden"), "{joined}");
+        app.area = Rect::new(0, 0, 200, 50);
+        assert!(status_badge(&app).is_empty());
     }
 
     #[test]

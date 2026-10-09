@@ -1,14 +1,19 @@
 //! Application state and view stack.
 
+use ratatui::layout::Rect;
 use ratatui::widgets::TableState;
 use std::collections::HashMap;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crate::anim::{Clock, Flashes};
 use crate::collect::git::Worktree;
+use crate::collect::git_detail::WorktreeDetail;
+use crate::collect::jobs::JobEvent;
 use crate::collect::loc::LocRow;
 use crate::fuzzy::Fuzzy;
-use crate::layout::FrameRects;
+use crate::layout::{band, widgets_for, FrameRects};
 use crate::theme::Theme;
 use crate::view;
 use crate::widget::WidgetKind;
@@ -37,21 +42,34 @@ pub struct DashboardData {
 pub struct DiffView {
     pub title: String,
     pub lines: Vec<String>,
+    /// True until the background `git diff` has answered.
+    pub loading: bool,
 }
 
-/// A drill-in detail target. The worktree detail keys off `App::last_wt_idx`/`wt_detail`,
-/// so it carries no index; job/container detail render directly by index.
+/// A drill-in detail target.
+///
+/// Row-backed details carry the row's stable key (see `rows::TableRow::key`),
+/// never a data index: a refresh may reorder or drop rows at any time, and an
+/// index would then silently point at a different item. The key is resolved
+/// against the live data on every render, which is also how "no longer
+/// present" gets noticed.
 pub enum Detail {
+    /// Keys off `App::wt_path`/`wt_detail`; the file diff needs the cached detail.
     Worktree,
-    Job(usize),
-    Container(usize),
+    /// Job id.
+    Job(String),
+    /// Container id.
+    Container(String),
     Diff(DiffView),
     Cost,
-    CostModel(usize),
+    /// Model name.
+    CostModel(String),
     Activity,
     Code,
-    Ports(usize),
-    Repo(usize), // the Repo slot now hosts the Skills widget; carries the skill index
+    /// Endpoint key (`host:port`).
+    Ports(String),
+    /// Skill key (`source/name`). The Repo slot hosts the Skills widget.
+    Repo(String),
 }
 
 /// The current screen.
@@ -93,25 +111,56 @@ impl WidgetUiState {
     }
 }
 
+/// The result of a drill-in that ran off the UI thread.
+///
+/// Each carries the token of the request that produced it; anything older than
+/// `App::load_token` is a superseded request and is dropped.
+pub enum Loaded {
+    Worktree { token: u64, detail: WorktreeDetail },
+    Logs { token: u64, lines: Vec<String> },
+    Diff { token: u64, view: DiffView },
+}
+
+/// Parsed job timeline, valid while the file's mtime and length are unchanged.
+pub struct TimelineCache {
+    pub job_id: String,
+    pub stamp: (Option<std::time::SystemTime>, u64),
+    pub events: Vec<JobEvent>,
+}
+
 pub struct App {
     pub data: Arc<Mutex<DashboardData>>,
     pub view: View,
     pub focus: WidgetKind,
     pub ui: HashMap<WidgetKind, WidgetUiState>,
     pub rects: FrameRects,
+    /// Size of the last drawn frame — decides which widgets the dashboard shows.
+    pub area: Rect,
     pub theme: Theme,
     pub should_quit: bool,
     pub show_help: bool,
     pub detail_scroll: u16,
+    /// Largest useful `detail_scroll` for the current detail, written by the
+    /// renderer. Input clamps against it so overscroll can never pile up.
+    pub detail_max: u16,
     pub detail_table: TableState,
-    pub last_wt_idx: Option<usize>,
-    pub wt_detail: Option<crate::collect::git_detail::WorktreeDetail>,
+    /// The Expanded widget a detail was opened from, so Back returns there.
+    pub origin: Option<WidgetKind>,
+    /// Path of the worktree whose detail is open.
+    pub wt_path: Option<String>,
+    pub wt_detail: Option<WorktreeDetail>,
+    /// When the open worktree detail was last (re)requested.
+    pub wt_requested: Option<Instant>,
     pub container_logs: Vec<String>,
+    pub timeline: Option<TimelineCache>,
 
     /// Drives spinners, pulses, and flash fades.
     pub clock: Clock,
     /// Rows that changed recently, by `WidgetKind`-scoped row key.
     pub flashes: Flashes,
+    /// True when the last frame drew a row that is still fading. Only visible
+    /// motion is worth a fast tick.
+    pub anim_visible: bool,
     /// Reused fuzzy matcher — constructing one per keystroke would allocate.
     pub fuzzy: Fuzzy,
     pub mode: Mode,
@@ -123,57 +172,168 @@ pub struct App {
     /// data, filter, or sort changes — every selection bound reads this, so
     /// filtered-away rows can never be selected or drilled into.
     pub visible: HashMap<WidgetKind, Vec<usize>>,
+    /// Row keys parallel to `visible`, so a selection can follow its row
+    /// across a refresh that reorders the data.
+    visible_keys: HashMap<WidgetKind, Vec<String>>,
     /// Last-seen row signatures, per widget, for change detection.
     sigs: HashMap<WidgetKind, HashMap<String, String>>,
+    /// Background drill-in results.
+    load_tx: Sender<Loaded>,
+    load_rx: Receiver<Loaded>,
+    pub load_token: u64,
+    /// A background drill-in is in flight.
+    pub loading: bool,
 }
 
 impl App {
     pub fn new(theme: Theme) -> Self {
+        let (load_tx, load_rx) = channel();
         App {
             data: Arc::new(Mutex::new(DashboardData::default())),
             view: View::Dashboard,
             focus: WidgetKind::Worktrees,
             ui: HashMap::new(),
             rects: FrameRects::default(),
+            area: Rect::default(),
             theme,
             should_quit: false,
             show_help: false,
             detail_scroll: 0,
+            detail_max: 0,
             detail_table: TableState::default(),
-            last_wt_idx: None,
+            origin: None,
+            wt_path: None,
             wt_detail: None,
+            wt_requested: None,
             container_logs: Vec::new(),
+            timeline: None,
             clock: Clock::default(),
             flashes: Flashes::default(),
+            anim_visible: false,
             fuzzy: Fuzzy::default(),
             mode: Mode::Normal,
             input: String::new(),
             palette_sel: 0,
             visible: HashMap::new(),
+            visible_keys: HashMap::new(),
             sigs: HashMap::new(),
+            load_tx,
+            load_rx,
+            load_token: 0,
+            loading: false,
+        }
+    }
+
+    /// Widgets the dashboard currently places. Empty before the first frame,
+    /// which callers treat as "everything is reachable".
+    pub fn placed(&self) -> Vec<WidgetKind> {
+        widgets_for(band(self.area))
+    }
+
+    /// True when `k` has a cell on the dashboard at the current size.
+    pub fn is_placed(&self, k: WidgetKind) -> bool {
+        let p = self.placed();
+        p.is_empty() || p.contains(&k)
+    }
+
+    /// How many widgets the current size band leaves off the dashboard.
+    pub fn hidden_count(&self) -> usize {
+        let p = self.placed();
+        if p.is_empty() {
+            0
+        } else {
+            WidgetKind::all().len() - p.len()
+        }
+    }
+
+    /// Cycle focus. On the dashboard, widgets the size band hides are skipped
+    /// (focusing something invisible strands the keyboard); in the Expanded
+    /// view every widget is reachable and the view follows the focus.
+    fn step_focus(&mut self, forward: bool) {
+        let step = |k: WidgetKind| if forward { k.next() } else { k.prev() };
+        match self.view {
+            View::Expanded(_) => {
+                self.focus = step(self.focus);
+                self.view = View::Expanded(self.focus);
+            }
+            View::Dashboard => {
+                let mut k = self.focus;
+                for _ in 0..WidgetKind::all().len() {
+                    k = step(k);
+                    if self.is_placed(k) {
+                        break;
+                    }
+                }
+                self.focus = k;
+            }
+            // Focus is a dashboard concept; a detail screen has nothing to cycle.
+            View::Detail(_) => {}
         }
     }
 
     pub fn focus_next(&mut self) {
-        self.focus = self.focus.next();
+        self.step_focus(true);
     }
     pub fn focus_prev(&mut self) {
-        self.focus = self.focus.prev();
+        self.step_focus(false);
     }
     pub fn expand_focused(&mut self) {
         self.view = View::Expanded(self.focus);
     }
 
-    /// Pop one level: Diff -> Worktree detail -> Dashboard; everything else -> Dashboard.
+    /// Focus `k`, expanding it when the dashboard has no room to show it.
+    pub fn focus_widget(&mut self, k: WidgetKind) {
+        self.focus = k;
+        self.origin = None;
+        self.view = if self.is_placed(k) {
+            View::Dashboard
+        } else {
+            View::Expanded(k)
+        };
+    }
+
+    /// True on the screens where the focused widget's rows are on show — the
+    /// only places filter and sort mean anything.
+    pub fn table_view(&self) -> bool {
+        matches!(self.view, View::Dashboard | View::Expanded(_))
+    }
+
+    /// Pop one level: Diff -> Worktree detail -> wherever the detail was opened
+    /// from (Expanded or Dashboard); CostModel -> Cost; Expanded -> Dashboard.
     pub fn back(&mut self) {
         let cur = std::mem::replace(&mut self.view, View::Dashboard);
         self.view = match cur {
-            View::Detail(Detail::Diff(_)) if self.last_wt_idx.is_some() => {
+            View::Detail(Detail::Diff(_)) if self.wt_path.is_some() => {
                 View::Detail(Detail::Worktree)
             }
             View::Detail(Detail::CostModel(_)) => View::Detail(Detail::Cost),
+            View::Detail(_) => match self.origin.take() {
+                Some(k) => View::Expanded(k),
+                None => View::Dashboard,
+            },
             _ => View::Dashboard,
         };
+        if !matches!(self.view, View::Detail(_)) {
+            self.wt_path = None;
+            self.wt_detail = None;
+            self.loading = false;
+        }
+    }
+
+    /// Open a detail screen, remembering an Expanded origin for Back.
+    pub fn open_detail(&mut self, d: Detail) {
+        if let View::Expanded(k) = self.view {
+            self.origin = Some(k);
+        } else if !matches!(self.view, View::Detail(_)) {
+            self.origin = None;
+        }
+        self.view = View::Detail(d);
+        self.detail_scroll = 0;
+    }
+
+    /// Clamp a scroll request against the last rendered maximum.
+    pub fn set_detail_scroll(&mut self, v: u16) {
+        self.detail_scroll = v.min(self.detail_max);
     }
 
     pub fn ui_mut(&mut self, k: WidgetKind) -> &mut WidgetUiState {
@@ -198,8 +358,8 @@ impl App {
 
     /// Map a displayed row position to its index in the underlying data.
     ///
-    /// Everything that drills in goes through here: with a filter or sort
-    /// active, row 0 on screen is rarely row 0 in the collector's vector.
+    /// With a filter or sort active, row 0 on screen is rarely row 0 in the
+    /// collector's vector.
     pub fn data_index(&self, k: WidgetKind, visible_pos: usize) -> Option<usize> {
         self.visible.get(&k)?.get(visible_pos).copied()
     }
@@ -210,6 +370,13 @@ impl App {
         self.data_index(k, sel)
     }
 
+    /// The stable row key under the selection for widget `k`. Drill-ins carry
+    /// this, never an index.
+    pub fn selected_key(&self, k: WidgetKind) -> Option<String> {
+        let sel = self.ui.get(&k)?.table.selected()?;
+        self.visible_keys.get(&k)?.get(sel).cloned()
+    }
+
     /// Flash key for a row, namespaced so two widgets cannot collide.
     pub fn flash_key(k: WidgetKind, row_key: &str) -> String {
         format!("{k:?}/{row_key}")
@@ -217,8 +384,10 @@ impl App {
 
     /// Recompute the visible index lists for every table widget.
     ///
-    /// Also clamps each selection into range, so narrowing a filter never
-    /// leaves the cursor pointing past the end of the list.
+    /// The selection follows its row by key, so a refresh that reorders or
+    /// drops rows never silently moves the cursor onto a different item. Only
+    /// when the selected row is gone does it fall back to clamping the old
+    /// position into range.
     pub fn refilter(&mut self) {
         let data = self.data.lock().unwrap();
         for &k in WidgetKind::all() {
@@ -227,15 +396,24 @@ impl App {
             }
             let st = self.ui.entry(k).or_default();
             let (filter, sort) = (st.filter.clone(), st.sort());
+            let prev_sel = st.table.selected();
+            let prev_key = prev_sel.and_then(|s| self.visible_keys.get(&k)?.get(s).cloned());
             let idx = view::visible(k, &data, &filter, sort, &mut self.fuzzy);
+            let keys = view::keys(k, &data, &idx);
+            let n = idx.len();
+            let found = prev_key.and_then(|key| keys.iter().position(|x| *x == key));
+            let next = match (found, prev_sel) {
+                (Some(p), _) => Some(p),
+                _ if n == 0 => None,
+                (None, Some(s)) => Some(s.min(n - 1)),
+                (None, None) => Some(0),
+            };
             let st = self.ui.entry(k).or_default();
-            match (st.table.selected(), idx.len()) {
-                (Some(_), 0) => st.table.select(None),
-                (Some(s), n) if s >= n => st.table.select(Some(n - 1)),
-                (None, n) if n > 0 => st.table.select(Some(0)),
-                _ => {}
+            if st.table.selected() != next {
+                st.table.select(next);
             }
             self.visible.insert(k, idx);
+            self.visible_keys.insert(k, keys);
         }
     }
 
@@ -266,6 +444,77 @@ impl App {
         }
         self.flashes.gc();
         self.refilter();
+    }
+
+    /// Run `job` on a worker thread; its result arrives via [`App::drain_loads`].
+    ///
+    /// Drill-ins shell out to `git` and `docker`, which can take seconds on a
+    /// big repo or a busy daemon — long enough to freeze the UI if run inline.
+    pub fn spawn_load(&mut self, job: impl FnOnce(u64) -> Loaded + Send + 'static) {
+        self.load_token += 1;
+        self.loading = true;
+        let token = self.load_token;
+        let tx = self.load_tx.clone();
+        std::thread::spawn(move || {
+            // The receiver only disappears when the app is shutting down.
+            let _ = tx.send(job(token));
+        });
+    }
+
+    /// Apply finished background loads. Returns true when anything changed.
+    pub fn drain_loads(&mut self) -> bool {
+        let mut changed = false;
+        while let Ok(msg) = self.load_rx.try_recv() {
+            changed |= self.apply_load(msg);
+        }
+        changed
+    }
+
+    fn apply_load(&mut self, msg: Loaded) -> bool {
+        let token = match &msg {
+            Loaded::Worktree { token, .. } | Loaded::Logs { token, .. } => *token,
+            Loaded::Diff { token, .. } => *token,
+        };
+        if token != self.load_token {
+            return false;
+        }
+        self.loading = false;
+        match msg {
+            Loaded::Worktree { detail, .. } => {
+                if self.wt_path.as_deref() == Some(detail.path.as_str()) {
+                    self.wt_detail = Some(detail);
+                }
+            }
+            Loaded::Logs { lines, .. } => {
+                if matches!(self.view, View::Detail(Detail::Container(_))) {
+                    self.container_logs = lines;
+                    // Logs read newest-last: open at the bottom, where the
+                    // renderer clamps this to the real maximum.
+                    self.detail_scroll = u16::MAX;
+                }
+            }
+            Loaded::Diff { view, .. } => {
+                if let View::Detail(Detail::Diff(dv)) = &mut self.view {
+                    *dv = view;
+                }
+            }
+        }
+        true
+    }
+
+    /// Block until the in-flight load lands. Tests only — the app never waits.
+    #[cfg(test)]
+    pub fn wait_loads(&mut self) {
+        while self.loading {
+            if let Ok(msg) = self
+                .load_rx
+                .recv_timeout(std::time::Duration::from_secs(10))
+            {
+                self.apply_load(msg);
+            } else {
+                break;
+            }
+        }
     }
 }
 

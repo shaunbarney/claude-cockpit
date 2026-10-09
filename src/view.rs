@@ -77,6 +77,14 @@ pub fn visible(
     on_rows!(kind, d, |rows| prepare(rows, filter, sort, fz))
 }
 
+/// Row keys for the rows at `idx`, in the same order.
+pub fn keys(kind: WidgetKind, d: &DashboardData, idx: &[usize]) -> Vec<String> {
+    on_rows!(kind, d, |rows| idx
+        .iter()
+        .filter_map(|&i| rows.get(i).map(TableRow::key))
+        .collect())
+}
+
 /// `(key, signature)` for every row, used to detect what changed between
 /// refreshes.
 pub fn signatures(kind: WidgetKind, d: &DashboardData) -> HashMap<String, String> {
