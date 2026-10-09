@@ -205,11 +205,24 @@ use std::time::Duration;
 
 /// Top-anchored refresh: build the frame (slow git/tokei work) BEFORE clearing,
 /// so the previous frame stays on screen until the new one is ready (no flash).
-/// Ctrl-C exits cleanly.
+/// `git fetch` runs at most every [`crate::refresh::FETCH_EVERY`], however
+/// short the interval. Ctrl-C exits cleanly.
+///
+/// `interval` must be finite and positive (the CLI enforces >= 0.5 s); a bad
+/// value is clamped rather than panicking or spinning.
 pub fn watch(root: &str, mode: Mode, interval: f64) {
+    let interval = if interval.is_finite() {
+        interval.max(0.5)
+    } else {
+        10.0
+    };
     let note = format!("⟳ every {}s · Ctrl-C to stop", trim_float(interval));
+    let mut last_fetch: Option<std::time::Instant> = None;
     loop {
-        crate::collect::git::fetch_origin(root);
+        if last_fetch.is_none_or(|t| t.elapsed() >= crate::refresh::FETCH_EVERY) {
+            crate::refresh::fetch_origin_bounded(root);
+            last_fetch = Some(std::time::Instant::now());
+        }
         let frame = build_frame(root, mode, &note);
         // clear screen + move cursor home, then print.
         println!("\x1b[2J\x1b[H{frame}");

@@ -144,7 +144,7 @@ fn list(reg: &Registry, all: bool, tag: Option<&str>, json: bool) -> Result<(), 
     let projects: Vec<_> = reg
         .ordered()
         .into_iter()
-        .filter(|p| tag.map_or(true, |t| p.tags.iter().any(|x| x == t)))
+        .filter(|p| tag.is_none_or(|t| p.tags.iter().any(|x| x == t)))
         .collect();
     let sugg = if all {
         suggestions(reg, &load_state())

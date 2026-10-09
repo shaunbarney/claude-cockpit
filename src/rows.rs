@@ -372,6 +372,7 @@ mod tests {
             up: lat.is_some(),
             latency_ms: lat,
             pid: None,
+            ..Endpoint::default()
         };
         assert_eq!(ep(Some(3)).sig(), ep(Some(5)).sig());
         assert_ne!(ep(Some(3)).sig(), ep(Some(300)).sig());
@@ -387,6 +388,7 @@ mod tests {
             up: lat.is_some(),
             latency_ms: lat,
             pid: None,
+            ..Endpoint::default()
         };
         let rows = vec![ep("down", None), ep("fast", Some(2))];
         let mut fz = Fuzzy::default();

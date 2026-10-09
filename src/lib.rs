@@ -16,6 +16,7 @@ pub mod fuzzy;
 pub mod graph;
 pub mod layout;
 pub mod palette;
+pub mod proc;
 pub mod projects;
 pub mod refresh;
 pub mod render;

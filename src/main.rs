@@ -1,12 +1,19 @@
-use claude_cockpit::{collect, render, runloop};
+use std::io::IsTerminal;
+
+use claude_cockpit::{collect, config, refresh, render, runloop};
 
 use clap::Parser;
 use render::Mode;
 
+/// Shortest accepted `--interval`, in seconds. Anything faster just burns CPU
+/// re-running git and tokei.
+const MIN_INTERVAL: f64 = 0.5;
+
 /// claude-cockpit — a live, read-only terminal dashboard for Claude Code and your dev environment.
 ///
 /// Run with no arguments to launch the interactive cockpit. The one-shot flags
-/// (`--worktrees`, `--code`, `--watch`) print a static table instead, handy for scripts.
+/// (`--worktrees`, `--code`, `--watch`) print a static table instead, handy for
+/// scripts. `--watch` on its own shows worktrees and repo LOC side by side.
 #[derive(Parser)]
 #[command(
     name = "claude-cockpit",
@@ -15,7 +22,7 @@ use render::Mode;
 )]
 struct Cli {
     /// Force the interactive cockpit (this is the default with no flags).
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["worktrees", "code", "watch"])]
     tui: bool,
     /// One-shot: worktrees table only.
     #[arg(long, conflicts_with = "code")]
@@ -23,28 +30,57 @@ struct Cli {
     /// One-shot: worktrees + repo LOC, stacked vertically.
     #[arg(long)]
     code: bool,
-    /// Refresh the one-shot render in place continuously.
+    /// Refresh the one-shot render in place continuously. Alone, it shows
+    /// worktrees and repo LOC side by side; combine with `--worktrees` or
+    /// `--code` to watch that layout instead.
     #[arg(long)]
     watch: bool,
-    /// Refresh seconds for the one-shot `--watch` render.
-    #[arg(long, default_value_t = 10.0)]
+    /// Refresh seconds for the one-shot `--watch` render (finite, >= 0.5).
+    #[arg(long, default_value_t = 10.0, value_parser = parse_interval)]
     interval: f64,
 }
 
-fn main() {
-    let cli = Cli::parse();
-    let root = collect::git::repo_root();
-
-    // Default (no one-shot flag) launches the interactive cockpit.
-    let wants_oneshot = cli.worktrees || cli.code || cli.watch;
-    if cli.tui || !wants_oneshot {
-        if let Err(e) = runloop::run(&root) {
-            eprintln!("claude-cockpit: error: {e}");
-            std::process::exit(1);
-        }
-        return;
+/// `--interval` must be a finite number of seconds, at least [`MIN_INTERVAL`].
+fn parse_interval(s: &str) -> Result<f64, String> {
+    let v: f64 = s
+        .trim()
+        .parse()
+        .map_err(|_| format!("`{s}` is not a number of seconds"))?;
+    if !v.is_finite() || v < MIN_INTERVAL {
+        return Err(format!(
+            "must be a finite number of seconds >= {MIN_INTERVAL}"
+        ));
     }
+    Ok(v)
+}
 
+/// Print config problems (parse errors, unknown keys) to stderr.
+fn report_config(root: &str) {
+    for d in config::load_cached(root).1 {
+        eprintln!("claude-cockpit: config: {d}");
+    }
+}
+
+fn run_tui(root: &str) {
+    if !std::io::stdout().is_terminal() || !std::io::stdin().is_terminal() {
+        eprintln!(
+            "claude-cockpit: the interactive cockpit needs a terminal (stdin/stdout is not a TTY).\n\
+             For scripts and pipes use a one-shot view: --worktrees, --code, or --watch."
+        );
+        std::process::exit(1);
+    }
+    if let Err(e) = runloop::run(root) {
+        eprintln!("claude-cockpit: error: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn run_oneshot(cli: &Cli, root: &str) {
+    if root.is_empty() {
+        eprintln!("claude-cockpit: not inside a git repository — cd into a repo and try again.");
+        std::process::exit(1);
+    }
+    report_config(root);
     let mode = if cli.worktrees {
         Mode::Worktrees
     } else if cli.code {
@@ -52,11 +88,52 @@ fn main() {
     } else {
         Mode::Side
     };
-
     if cli.watch {
-        render::watch(&root, mode, cli.interval);
+        render::watch(root, mode, cli.interval);
     } else {
-        collect::git::fetch_origin(&root);
-        println!("{}", render::build_frame(&root, mode, ""));
+        refresh::fetch_origin_bounded(root);
+        println!("{}", render::build_frame(root, mode, ""));
+    }
+}
+
+fn main() {
+    let cli = Cli::parse();
+    // Empty outside a git repo; the TUI still starts (Docker, agents, cost and
+    // tools don't need a repo) and skips the git-backed widgets.
+    let root = collect::git::repo_root();
+
+    let wants_oneshot = cli.worktrees || cli.code || cli.watch;
+    if cli.tui || !wants_oneshot {
+        run_tui(&root);
+    } else {
+        run_oneshot(&cli, &root);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_definition_is_valid() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn interval_validation() {
+        assert_eq!(parse_interval("2.5"), Ok(2.5));
+        assert_eq!(parse_interval("0.5"), Ok(0.5));
+        for bad in ["0", "0.1", "-1", "nan", "inf", "-inf", "abc", ""] {
+            assert!(parse_interval(bad).is_err(), "{bad} should be rejected");
+        }
+    }
+
+    #[test]
+    fn tui_conflicts_with_oneshot_flags() {
+        for flag in ["--worktrees", "--code", "--watch"] {
+            assert!(Cli::try_parse_from(["claude-cockpit", "--tui", flag]).is_err());
+        }
+        assert!(Cli::try_parse_from(["claude-cockpit", "--watch", "--code"]).is_ok());
     }
 }

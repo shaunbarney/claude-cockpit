@@ -273,6 +273,7 @@ mod tests {
                     mem_used: 0,
                     mem_limit: 0,
                     ports: vec![],
+                    ..Container::default()
                 },
                 Container {
                     id: "b".into(),
@@ -284,6 +285,7 @@ mod tests {
                     mem_used: 0,
                     mem_limit: 0,
                     ports: vec![],
+                    ..Container::default()
                 },
             ],
             usage: Some(UsageTotals {

@@ -19,10 +19,14 @@ pub fn render(f: &mut Frame, area: Rect, ep: &Endpoint, theme: &Theme) {
         .latency_ms
         .map(|ms| format!("{ms}ms"))
         .unwrap_or_else(|| "—".to_string());
-    let pid = ep
-        .pid
-        .map(|p| p.to_string())
-        .unwrap_or_else(|| "—".to_string());
+    let pid = match (ep.pid, ep.process.as_deref()) {
+        (Some(p), Some(cmd)) => format!("{p} ({cmd})"),
+        (Some(p), None) => p.to_string(),
+        // Docker-published ports are held by a root-owned proxy we can't see.
+        (None, _) if ep.container.is_some() => "— (held by Docker)".to_string(),
+        (None, _) => "— (not visible to this user, or nothing listening)".to_string(),
+    };
+    let container = ep.container.clone().unwrap_or_else(|| "—".to_string());
 
     let lines = vec![
         Line::from(vec![
@@ -31,7 +35,7 @@ pub fn render(f: &mut Frame, area: Rect, ep: &Endpoint, theme: &Theme) {
         ]),
         Line::from(vec![
             Span::styled("address  ", theme.dim_style()),
-            Span::raw(format!("{}:{}", ep.host, ep.port)),
+            Span::raw(ep.addr()),
         ]),
         Line::from(vec![Span::styled("status   ", theme.dim_style()), status]),
         Line::from(vec![
@@ -41,6 +45,10 @@ pub fn render(f: &mut Frame, area: Rect, ep: &Endpoint, theme: &Theme) {
         Line::from(vec![
             Span::styled("pid      ", theme.dim_style()),
             Span::raw(pid),
+        ]),
+        Line::from(vec![
+            Span::styled("owner    ", theme.dim_style()),
+            Span::raw(container),
         ]),
     ];
 
@@ -69,6 +77,7 @@ mod tests {
             up: true,
             latency_ms: Some(5),
             pid: Some(99),
+            ..Endpoint::default()
         };
         let mut term = Terminal::new(TestBackend::new(60, 10)).unwrap();
         term.draw(|f| render(f, f.area(), &ep, &Theme::default()))
@@ -76,5 +85,23 @@ mod tests {
         let s = text(term.backend().buffer());
         assert!(s.contains("api"), "expected label");
         assert!(s.contains("127.0.0.1:8080"), "expected address");
+    }
+
+    #[test]
+    fn shows_publishing_container() {
+        let ep = Endpoint {
+            label: "backend".into(),
+            host: "127.0.0.1".into(),
+            port: 8001,
+            up: true,
+            container: Some("sovra-backend-dev".into()),
+            ..Endpoint::default()
+        };
+        let mut term = Terminal::new(TestBackend::new(70, 10)).unwrap();
+        term.draw(|f| render(f, f.area(), &ep, &Theme::default()))
+            .unwrap();
+        let s = text(term.backend().buffer());
+        assert!(s.contains("sovra-backend-dev"));
+        assert!(s.contains("held by Docker"));
     }
 }
