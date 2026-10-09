@@ -713,6 +713,27 @@ mod tests {
     }
 
     #[test]
+    fn container_logs_open_at_the_newest_line_when_they_land() {
+        let mut app = App::new(Theme::default());
+        app.data.lock().unwrap().containers = vec![crate::collect::docker::Container {
+            id: "c1".into(),
+            name: "svc".into(),
+            ..Default::default()
+        }];
+        app.open_detail(Detail::Container("c1".into()));
+        let lines: Vec<String> = (0..100).map(|i| format!("log line {i}")).collect();
+        app.spawn_load(move |token| crate::app::Loaded::Logs { token, lines });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !app.drain_loads() {
+            assert!(std::time::Instant::now() < deadline, "logs never landed");
+            std::thread::yield_now();
+        }
+        let s = draw(&mut app, 100, 30);
+        assert!(s.contains("log line 99"), "newest line must be on screen");
+        assert_eq!(app.detail_scroll, app.detail_max);
+    }
+
+    #[test]
     fn palette_hides_filter_and_sort_on_chart_widgets() {
         let mut app = App::new(Theme::default());
         app.focus = WidgetKind::Cost;
