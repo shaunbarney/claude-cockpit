@@ -115,7 +115,8 @@ pub fn render(
     f.render_widget(block, area);
 
     let Some(totals) = usage else {
-        let p = Paragraph::new(Line::from(Span::styled("no usage yet", theme.dim_style())));
+        // The first transcript scan hasn't finished yet.
+        let p = Paragraph::new(Line::from(Span::styled("scanning…", theme.dim_style())));
         f.render_widget(p, inner);
         return;
     };
@@ -142,6 +143,11 @@ pub fn render(
     );
 
     let spark: Vec<u64> = rate.burn_trend.values.iter().map(|v| *v as u64).collect();
+    let spark_label = format!(
+        "output tok/{} · {}",
+        rate.burn_trend.unit(),
+        rate.burn_trend.label
+    );
     let spark_max = spark.iter().copied().max().unwrap_or(1).max(1);
 
     let compact = band == Band::Compact;
@@ -157,7 +163,7 @@ pub fn render(
         .split(inner);
         f.render_widget(Paragraph::new(summary), cuts[0]);
         render_window_gauge(f, cuts[1], rate, theme);
-        render_sparkline(f, cuts[2], &spark, spark_max, theme);
+        render_sparkline(f, cuts[2], &spark, spark_max, &spark_label, theme);
     } else {
         // Wide/medium: summary + 5h gauge + per-minute gauge + sparkline.
         let spark_h = inner.height.saturating_sub(3).max(1);
@@ -171,7 +177,7 @@ pub fn render(
         f.render_widget(Paragraph::new(summary), cuts[0]);
         render_window_gauge(f, cuts[1], rate, theme);
         render_minute_gauge(f, cuts[2], rate, theme);
-        render_sparkline(f, cuts[3], &spark, spark_max, theme);
+        render_sparkline(f, cuts[3], &spark, spark_max, &spark_label, theme);
     }
 }
 
@@ -223,7 +229,7 @@ fn render_minute_gauge(f: &mut Frame, area: Rect, rate: &RateStats, theme: &Them
     f.render_widget(gauge, area);
 }
 
-fn render_sparkline(f: &mut Frame, area: Rect, data: &[u64], max: u64, theme: &Theme) {
+fn render_sparkline(f: &mut Frame, area: Rect, data: &[u64], max: u64, label: &str, theme: &Theme) {
     if area.height == 0 {
         return;
     }
@@ -244,6 +250,20 @@ fn render_sparkline(f: &mut Frame, area: Rect, data: &[u64], max: u64, theme: &T
         f.render_widget(p, row);
         return;
     }
+    // Caption what the bars are, when there's room for a line above them.
+    let area = if area.height >= 3 {
+        let cuts = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                label.to_string(),
+                theme.dim_style(),
+            ))),
+            cuts[0],
+        );
+        cuts[1]
+    } else {
+        area
+    };
     let spark = Sparkline::default()
         .data(data)
         .max(max)
@@ -292,6 +312,7 @@ mod tests {
                 burn_trend: Trend {
                     values: vec![1000.0, 2000.0, 1500.0],
                     label: "last 3h".into(),
+                    hourly: true,
                 },
             },
             ..Default::default()
@@ -319,6 +340,18 @@ mod tests {
         assert!(s.contains("Rate"), "expected 'Rate' title");
         assert!(s.contains("5h"), "expected 5h window gauge");
         assert!(s.contains("resets"), "expected reset countdown");
+        assert!(
+            s.contains("output tok/hour · last 3h"),
+            "expected the sparkline caption"
+        );
+    }
+
+    #[test]
+    fn shows_scanning_before_first_scan() {
+        let mut term = Terminal::new(TestBackend::new(60, 8)).unwrap();
+        term.draw(|f| render(f, f.area(), None, &Theme::default(), false, Band::Wide))
+            .unwrap();
+        assert!(buffer_text(term.backend().buffer()).contains("scanning"));
     }
 }
 

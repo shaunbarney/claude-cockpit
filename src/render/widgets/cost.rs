@@ -12,20 +12,31 @@ use crate::layout::Band;
 use crate::theme::Theme;
 use crate::util::{short_model, thousands};
 
-/// Pick the widest header variant that fits `width` columns.
+/// Pick the widest header variant that fits `width` columns. `period` is the
+/// span the total covers (e.g. `"35d"`) — transcripts are pruned, so the total
+/// is not all-time.
 fn header_line(
     total: f64,
+    period: &str,
     today_cost: f64,
     cache_pct: u64,
     width: u16,
     theme: &Theme,
 ) -> Line<'static> {
-    let full = format!("Total ${total:.2}  ·  Today ${today_cost:.2}  ·  cache-hit {cache_pct}%");
+    let label = if period.is_empty() {
+        "Total".to_string()
+    } else {
+        format!("Total ({period})")
+    };
+    let full = format!("{label} ${total:.2}  ·  Today ${today_cost:.2}  ·  cache-hit {cache_pct}%");
     let med = format!("${total:.2} · today ${today_cost:.2} · {cache_pct}%");
     let w = width as usize;
     if full.chars().count() <= w {
         Line::from(vec![
-            Span::styled(format!("Total ${total:.2}"), Style::new().fg(theme.accent)),
+            Span::styled(
+                format!("{label} ${total:.2}"),
+                Style::new().fg(theme.accent),
+            ),
             Span::raw(format!(
                 "  ·  Today ${today_cost:.2}  ·  cache-hit {cache_pct}%"
             )),
@@ -63,7 +74,8 @@ pub fn render(
         .border_style(border_style);
 
     let Some(totals) = totals else {
-        let p = Paragraph::new(Line::from("no usage data"))
+        // The first transcript scan hasn't finished yet.
+        let p = Paragraph::new(Line::from("scanning…"))
             .block(block)
             .style(theme.dim_style());
         f.render_widget(p, area);
@@ -94,7 +106,15 @@ pub fn render(
 
     // Adaptive spend curve — hourly when usage spans ~one day, daily over weeks.
     let cost_values = &totals.cost_trend.values;
-    let trend_label = totals.cost_trend.label.as_str();
+    let trend_label = format!(
+        "spend/{} · {}",
+        totals.cost_trend.unit(),
+        totals.cost_trend.label
+    );
+    let period = totals
+        .period_days(today)
+        .map(|d| format!("{d}d"))
+        .unwrap_or_default();
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -110,6 +130,16 @@ pub fn render(
     };
     let top_models: Vec<&ModelUsage> = totals.by_model.iter().take(max_models).collect();
 
+    // Unpriced models are counted as $0 — say so rather than under-report silently.
+    let inner = match unpriced_line(&totals.unpriced, theme) {
+        Some(warn) if inner.height > 3 => {
+            let cuts = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(inner);
+            f.render_widget(Paragraph::new(warn), cuts[1]);
+            cuts[0]
+        }
+        _ => inner,
+    };
+
     if compact {
         // Compact: header + model table stacked.
         let rows_count = (top_models.len() as u16).max(1);
@@ -118,6 +148,7 @@ pub fn render(
 
         let header = header_line(
             totals.total_cost_usd,
+            &period,
             today_cost,
             cache_pct,
             cuts[0].width,
@@ -141,15 +172,27 @@ pub fn render(
 
         let header = header_line(
             totals.total_cost_usd,
+            &period,
             today_cost,
             cache_pct,
             cuts[0].width,
             theme,
         );
         f.render_widget(Paragraph::new(header), cuts[0]);
-        render_chart(f, cuts[1], cost_values, trend_label, theme);
+        render_chart(f, cuts[1], cost_values, &trend_label, theme);
         render_model_table(f, cuts[2], &top_models, theme);
     }
+}
+
+/// `⚠ unpriced: a, b` warning, or `None` when every model has a price.
+pub(crate) fn unpriced_line(unpriced: &[String], theme: &Theme) -> Option<Line<'static>> {
+    if unpriced.is_empty() {
+        return None;
+    }
+    Some(Line::from(Span::styled(
+        format!("⚠ unpriced ($0): {}", unpriced.join(", ")),
+        Style::new().fg(theme.warn),
+    )))
 }
 
 fn render_chart(f: &mut Frame, area: Rect, costs: &[f64], label: &str, theme: &Theme) {
@@ -345,5 +388,46 @@ mod tests {
             Some("│".to_string()),
             "right border must be intact (no overflow)"
         );
+    }
+
+    fn draw(totals: Option<&UsageTotals>) -> String {
+        let mut term = Terminal::new(TestBackend::new(120, 16)).unwrap();
+        term.draw(|f| {
+            render(
+                f,
+                f.area(),
+                totals,
+                &Theme::default(),
+                false,
+                Band::Wide,
+                "2026-06-23",
+            );
+        })
+        .unwrap();
+        buffer_text(term.backend().buffer())
+    }
+
+    #[test]
+    fn scanning_before_first_scan_then_empty() {
+        assert!(draw(None).contains("scanning"));
+        assert!(draw(Some(&UsageTotals::default())).contains("no usage data"));
+    }
+
+    #[test]
+    fn total_states_period_and_flags_unpriced() {
+        let totals = UsageTotals {
+            by_day: vec![DayUsage {
+                day: "2026-06-23".into(),
+                cost_usd: 0.5,
+                tokens: 10,
+            }],
+            total_cost_usd: 2.0,
+            since_day: Some("2026-05-20".into()),
+            unpriced: vec!["claude-nova-1".into()],
+            ..Default::default()
+        };
+        let s = draw(Some(&totals));
+        assert!(s.contains("Total (35d)"), "{s}");
+        assert!(s.contains("unpriced") && s.contains("claude-nova-1"));
     }
 }

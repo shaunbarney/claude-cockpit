@@ -25,7 +25,8 @@ pub fn render(
     state: &mut TableState,
     today: &str,
 ) {
-    let chunks = Layout::vertical([Constraint::Length(4), Constraint::Min(0)]).split(area);
+    let header_h = if totals.unpriced.is_empty() { 4 } else { 5 };
+    let chunks = Layout::vertical([Constraint::Length(header_h), Constraint::Min(0)]).split(area);
     render_header(f, chunks[0], totals, theme, today);
     render_models(f, chunks[1], &totals.by_model, theme, state);
 }
@@ -38,9 +39,14 @@ fn render_header(f: &mut Frame, area: Rect, t: &UsageTotals, theme: &Theme, toda
         .map(|d| d.cost_usd)
         .unwrap_or(0.0);
     let hit = cache_hit(t.fresh_input, t.cache_write, t.cache_read);
-    let lines = vec![
+    // Transcripts are pruned, so name the period the total actually covers.
+    let label = match (t.since_day.as_deref(), t.period_days(today)) {
+        (Some(since), Some(days)) => format!("Total since {since} ({days}d) "),
+        _ => "Total ".to_string(),
+    };
+    let mut lines = vec![
         Line::from(vec![
-            Span::raw("Total "),
+            Span::raw(label),
             Span::styled(
                 format!("${:.2}", t.total_cost_usd),
                 Style::new().fg(theme.accent),
@@ -57,6 +63,10 @@ fn render_header(f: &mut Frame, area: Rect, t: &UsageTotals, theme: &Theme, toda
             )),
         ]),
     ];
+    lines.extend(crate::render::widgets::cost::unpriced_line(
+        &t.unpriced,
+        theme,
+    ));
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Cost ")
@@ -262,5 +272,30 @@ mod tests {
         let s = text(term.backend().buffer());
         assert!(s.contains("opus-4-8"), "expected model name in header");
         assert!(s.contains("2026-06-22"), "expected day in daily list");
+    }
+
+    #[test]
+    fn header_names_period_and_unpriced() {
+        let totals = UsageTotals {
+            since_day: Some("2026-06-01".into()),
+            unpriced: vec!["mystery".into()],
+            ..sample()
+        };
+        let mut st = TableState::default();
+        let mut term = Terminal::new(TestBackend::new(100, 20)).unwrap();
+        term.draw(|f| {
+            render(
+                f,
+                f.area(),
+                &totals,
+                &Theme::default(),
+                &mut st,
+                "2026-06-23",
+            )
+        })
+        .unwrap();
+        let s = text(term.backend().buffer());
+        assert!(s.contains("since 2026-06-01 (23d)"), "{s}");
+        assert!(s.contains("unpriced") && s.contains("mystery"));
     }
 }

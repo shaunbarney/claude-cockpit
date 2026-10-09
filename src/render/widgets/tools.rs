@@ -1,4 +1,4 @@
-//! Tools widget: most-used tools across recent sessions, with proportional
+//! Tools widget: most-used tools over the trailing 7 days, with proportional
 //! bars. Replaces the old generic process list with something Claude-relevant.
 
 use ratatui::layout::{Constraint, Rect};
@@ -61,11 +61,11 @@ pub fn render(
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Tools ")
+        .title(" Tools · 7d ")
         .border_style(border_style);
 
     if tools.is_empty() {
-        let msg = Span::styled("no tool usage yet", theme.dim_style());
+        let msg = Span::styled("no tool use in the last 7 days", theme.dim_style());
         f.render_widget(Paragraph::new(msg).block(block), area);
         return;
     }
