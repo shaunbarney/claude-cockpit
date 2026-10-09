@@ -2,11 +2,11 @@
 //! Counts `tool_use` blocks per tool name over a trailing window — "where the
 //! agent spends its actions" — replacing the old generic process list.
 
-use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
-use std::time::SystemTime;
+use std::collections::HashMap;
 
 use serde_json::Value;
+
+use crate::collect::usage::{parse_ts, transcript_files, TailCache};
 
 /// One tool's usage count.
 #[derive(Debug, Clone, PartialEq)]
@@ -15,44 +15,56 @@ pub struct ToolStat {
     pub count: u64,
 }
 
-/// Parse deduped `(tool_name, timestamp_ms)` tool-use events from one session.
-/// Dedupes by `message.id` (assistant messages are logged repeatedly while
-/// streaming, which would otherwise multiply every tool call).
-pub fn parse_tool_events(jsonl: &str) -> Vec<(String, i64)> {
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut out = Vec::new();
+/// tool_use id -> (tool name, timestamp ms; 0 when unknown).
+type ToolEvents = HashMap<String, (String, i64)>;
+
+/// Fold `tool_use` blocks from newly appended lines into `out`.
+///
+/// Every line is scanned: an assistant turn is logged once per content block
+/// while streaming, so a turn's `tool_use` blocks usually arrive on *later*
+/// lines than its first copy — deduping by `message.id` and keeping the first
+/// line (as before) missed ~70% of calls. Calls are deduped by the block's own
+/// `tool_use.id` instead, which also collapses repeated copies of a line.
+fn parse_into(out: &mut ToolEvents, jsonl: &str) {
     for line in jsonl.lines() {
+        if !line.contains("\"tool_use\"") {
+            continue;
+        }
         let Ok(v) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        if v.get("type").and_then(|x| x.as_str()) != Some("assistant") {
+        if v.get("type").and_then(Value::as_str) != Some("assistant") {
             continue;
         }
-        let Some(msg) = v.get("message") else {
+        let Some(content) = v
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_array)
+        else {
             continue;
         };
-        let id = msg.get("id").and_then(|x| x.as_str()).unwrap_or("");
-        if id.is_empty() || !seen.insert(id.to_string()) {
-            continue;
-        }
-        let ts = v
-            .get("timestamp")
-            .and_then(|x| x.as_str())
-            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-            .map(|d| d.timestamp_millis())
-            .unwrap_or(0);
-        let Some(content) = msg.get("content").and_then(|c| c.as_array()) else {
-            continue;
-        };
+        let ts = parse_ts(&v).unwrap_or(0);
         for block in content {
-            if block.get("type").and_then(|x| x.as_str()) == Some("tool_use") {
-                if let Some(name) = block.get("name").and_then(|x| x.as_str()) {
-                    out.push((name.to_string(), ts));
-                }
+            if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+                continue;
             }
+            let (Some(id), Some(name)) = (
+                block.get("id").and_then(Value::as_str),
+                block.get("name").and_then(Value::as_str),
+            ) else {
+                continue;
+            };
+            out.entry(id.to_string())
+                .or_insert_with(|| (name.to_string(), ts));
         }
     }
-    out
+}
+
+/// Parse deduped `(tool_name, timestamp_ms)` tool-use events from one session.
+pub fn parse_tool_events(jsonl: &str) -> Vec<(String, i64)> {
+    let mut m = ToolEvents::new();
+    parse_into(&mut m, jsonl);
+    m.into_values().collect()
 }
 
 /// Aggregate `(name, ts)` events into counts within `[now - window, now]`
@@ -77,66 +89,78 @@ pub fn aggregate(events: &[(String, i64)], now_ms: i64, window_days: i64) -> Vec
     v
 }
 
-/// Per-file cache: path -> (mtime, len, parsed events). Re-parse only on change.
-pub type ToolCache = HashMap<PathBuf, (SystemTime, u64, Vec<(String, i64)>)>;
+/// Per-file incremental cache of parsed tool-use events.
+#[derive(Debug, Default)]
+pub struct ToolCache {
+    files: TailCache<ToolEvents>,
+}
 
-/// Scan all transcripts (re-reading only changed files) and return tool counts
-/// over the trailing `window_days`.
+impl ToolCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+/// Scan all transcripts (reading only appended lines) and return tool counts
+/// over the trailing `window_days`. Deduped by `tool_use.id` across files, so
+/// a resumed session's copied history isn't counted twice.
 pub fn scan_tools(cache: &mut ToolCache, now_ms: i64, window_days: i64) -> Vec<ToolStat> {
-    let Some(home) = crate::util::claude_home() else {
-        return vec![];
-    };
-    let mut files = Vec::new();
-    crate::collect::usage::collect_jsonl(&home.join("projects"), &mut files);
-    let mut all: Vec<(String, i64)> = Vec::new();
-    for path in &files {
-        let (mtime, len) = std::fs::metadata(path)
-            .map(|m| (m.modified().unwrap_or(SystemTime::UNIX_EPOCH), m.len()))
-            .unwrap_or((SystemTime::UNIX_EPOCH, 0));
-        let fresh = match cache.get(path) {
-            Some((mt, l, _)) => *mt != mtime || *l != len,
-            None => true,
-        };
-        if fresh {
-            let txt = std::fs::read_to_string(path).unwrap_or_default();
-            cache.insert(path.clone(), (mtime, len, parse_tool_events(&txt)));
-        }
-        if let Some((_, _, ev)) = cache.get(path) {
-            all.extend_from_slice(ev);
+    cache
+        .files
+        .update(&transcript_files(), |_, st, txt| parse_into(st, txt));
+    let mut all: ToolEvents = HashMap::new();
+    for st in cache.files.states() {
+        for (id, ev) in st {
+            all.entry(id.clone()).or_insert_with(|| ev.clone());
         }
     }
-    aggregate(&all, now_ms, window_days)
+    let events: Vec<(String, i64)> = all.into_values().collect();
+    aggregate(&events, now_ms, window_days)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn line(id: &str, ts: &str, tools: &[&str]) -> String {
+    /// One streamed assistant line carrying `tools` as `(tool_use_id, name)`.
+    fn line(msg_id: &str, ts: &str, tools: &[(&str, &str)]) -> String {
         let blocks: Vec<String> = tools
             .iter()
-            .map(|t| format!(r#"{{"type":"tool_use","name":"{t}"}}"#))
+            .map(|(id, t)| format!(r#"{{"type":"tool_use","id":"{id}","name":"{t}"}}"#))
             .collect();
         format!(
-            r#"{{"type":"assistant","timestamp":"{ts}","message":{{"id":"{id}","content":[{}]}}}}"#,
+            r#"{{"type":"assistant","timestamp":"{ts}","message":{{"id":"{msg_id}","content":[{}]}}}}"#,
             blocks.join(",")
         )
+    }
+
+    fn now() -> i64 {
+        chrono::DateTime::parse_from_rfc3339("2026-06-24T11:00:00Z")
+            .unwrap()
+            .timestamp_millis()
     }
 
     #[test]
     fn counts_tool_uses_and_dedupes() {
         let jsonl = [
-            line("m1", "2026-06-24T10:00:00Z", &["Bash", "Edit"]),
-            line("m1", "2026-06-24T10:00:00Z", &["Bash", "Edit"]), // streaming dupe
-            line("m2", "2026-06-24T10:01:00Z", &["Bash", "Read"]),
+            line(
+                "m1",
+                "2026-06-24T10:00:00Z",
+                &[("t1", "Bash"), ("t2", "Edit")],
+            ),
+            line(
+                "m1",
+                "2026-06-24T10:00:00Z",
+                &[("t1", "Bash"), ("t2", "Edit")],
+            ), // dupe
+            line(
+                "m2",
+                "2026-06-24T10:01:00Z",
+                &[("t3", "Bash"), ("t4", "Read")],
+            ),
         ]
         .join("\n");
-        let ev = parse_tool_events(&jsonl);
-        // m1 counted once: Bash, Edit; m2: Bash, Read → Bash×2, Edit×1, Read×1.
-        let now = chrono::DateTime::parse_from_rfc3339("2026-06-24T11:00:00Z")
-            .unwrap()
-            .timestamp_millis();
-        let stats = aggregate(&ev, now, 7);
+        let stats = aggregate(&parse_tool_events(&jsonl), now(), 7);
         assert_eq!(
             stats[0],
             ToolStat {
@@ -146,6 +170,21 @@ mod tests {
         );
         assert_eq!(stats.iter().find(|s| s.name == "Edit").unwrap().count, 1);
         assert_eq!(stats.iter().find(|s| s.name == "Read").unwrap().count, 1);
+    }
+
+    #[test]
+    fn counts_tool_uses_on_later_streamed_lines() {
+        // Real streaming shape: the first copy of m1 is text only; each tool_use
+        // block arrives on its own later line with the same message.id.
+        let jsonl = [
+            r#"{"type":"assistant","timestamp":"2026-06-24T10:00:00Z","message":{"id":"m1","content":[{"type":"text","text":"Let me look."}]}}"#.to_string(),
+            line("m1", "2026-06-24T10:00:01Z", &[("t1", "Read")]),
+            line("m1", "2026-06-24T10:00:02Z", &[("t2", "Bash")]),
+        ]
+        .join("\n");
+        let stats = aggregate(&parse_tool_events(&jsonl), now(), 7);
+        let total: u64 = stats.iter().map(|s| s.count).sum();
+        assert_eq!(total, 2, "{stats:?}");
     }
 
     #[test]
