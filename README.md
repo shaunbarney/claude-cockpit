@@ -101,6 +101,7 @@ claude-cockpit --help
 | `r` | Refresh now |
 | `P` | Project picker — switch, add and manage projects |
 | `1`–`9` | Switch to pinned project 1–9 |
+| `a` | On Jobs or Docker: toggle between this project and everything on the machine |
 | `Esc` | Clear the filter, back out of a detail view, or close an overlay |
 | `q` / `Ctrl-C` | Quit |
 
@@ -112,6 +113,8 @@ claude-cockpit --help
 | `:` or `Ctrl-K` | Command palette — fuzzy-search every action, including jumping to any widget |
 | `s` / `S` | Cycle the sort column / reverse it |
 | `?` | Toggle the key help |
+
+If a collector fails or your config has problems (a parse error, an unknown key), the header shows **⚠ N** — run *Show problems* from the palette for details.
 
 Filtering is fuzzy and searches more than the name column: a job matches on its state and intent, a container on its health and published ports. The footer shows the live match count, and the filter and sort in force.
 
