@@ -1,4 +1,6 @@
-//! Full-screen Rate detail: cache efficiency + full prompt-cadence history.
+//! Full-screen Rate detail: cache efficiency + prompt-cadence history. Prompts
+//! are human turns in main-session transcripts (see `collect::activity`), so
+//! the history spans the retained transcripts, not all time.
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
@@ -43,7 +45,8 @@ pub fn render(
                 )),
             ])
         }
-        _ => Line::from(Span::styled("no usage yet", theme.dim_style())),
+        Some(_) => Line::from(Span::styled("no usage yet", theme.dim_style())),
+        None => Line::from(Span::styled("scanning…", theme.dim_style())),
     };
 
     let header = vec![
@@ -66,7 +69,7 @@ pub fn render(
     // Body: full daily cadence, newest first, with a simple bar.
     let bblock = Block::default()
         .borders(Borders::ALL)
-        .title(" Daily prompts ")
+        .title(" Daily prompts (human turns, main sessions) ")
         .title_style(theme.title());
     if cadence.is_empty() {
         f.render_widget(
