@@ -34,6 +34,8 @@ pub enum Command {
     JobsAll(bool),
     /// Show every container (`true`) or only this project's.
     DockerAll(bool),
+    /// Open the list of collector failures and config problems.
+    Problems,
     /// Toggle the key help.
     Help,
     Quit,
@@ -127,6 +129,7 @@ pub fn registry(focus: WidgetKind, table_ops: bool) -> Vec<Entry> {
     }
 
     out.push(Entry::new("Refresh now", "r", Command::Refresh));
+    out.push(Entry::new("Show problems", "", Command::Problems));
     out.push(Entry::new("Toggle key help", "?", Command::Help));
     out.push(Entry::new("Quit", "q", Command::Quit));
     out

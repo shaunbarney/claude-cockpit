@@ -154,7 +154,8 @@ fn draw_content(f: &mut Frame, app: &mut App) {
     // Snapshot the datasets, then drop the lock before rendering.
     let data = app.data.lock().unwrap();
     let repo = data.repo.clone();
-    let kpis = header::kpis(&data, &today);
+    let mut kpis = header::kpis(&data, &today);
+    kpis.problems = app.problems.len();
     let wts = data.worktrees.clone();
     let loc = data.loc.clone();
     let jobs = data.jobs.clone();

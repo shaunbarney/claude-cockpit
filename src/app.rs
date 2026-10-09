@@ -197,6 +197,8 @@ pub struct App {
     /// A project switch requested by a key or command, applied by the run loop
     /// (which owns the refresh threads).
     pub pending_switch: Option<std::path::PathBuf>,
+    /// Collector failures and config diagnostics, refreshed by the run loop.
+    pub problems: Vec<String>,
 }
 
 impl App {
@@ -238,6 +240,7 @@ impl App {
             picker: None,
             project_list: Vec::new(),
             pending_switch: None,
+            problems: Vec::new(),
         }
     }
 

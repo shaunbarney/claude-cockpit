@@ -505,6 +505,11 @@ fn run_command(app: &mut App, cmd: Command, root: &str) {
         }
         Command::JobsAll(all) => crate::scope::set_jobs(all),
         Command::DockerAll(all) => crate::scope::set_docker(&app.data, all),
+        Command::Problems => app.open_detail(Detail::Diff(DiffView {
+            title: "Problems".into(),
+            lines: crate::problems::report(&app.problems),
+            loading: false,
+        })),
         Command::Help => app.show_help = !app.show_help,
         Command::Quit => app.should_quit = true,
     }

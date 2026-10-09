@@ -108,6 +108,7 @@ where
             app.sync();
             host::sync(app);
             refresh_worktree_detail(app);
+            app.problems = crate::problems::collect(&active.root());
             last_rev = rev;
             dirty = true;
         }
